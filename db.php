@@ -11,6 +11,9 @@ function db() {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
+        // NOW() di MySQL harus sama dengan jam PHP (Asia/Jakarta). Tanpa ini, server yang zona waktu Windows-nya lain
+        // (mis. UTC+8) mencatat last_seen 1 jam "di masa depan": laptop yang sudah mati tetap tampil online ±1 jam.
+        $pdo->exec("SET time_zone = '" . date('P') . "'");
         // Struktur database mengikuti versi kode: setelah kode diperbarui (git pull / salin file), migrasi berjalan
         // otomatis sekali pada request pertama, tanpa membuka setup.php. Gagal (mis. user MySQL tanpa hak ALTER)
         // dicatat di error log PHP; setup.php menampilkan pesan lengkapnya.

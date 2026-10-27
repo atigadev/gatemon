@@ -15,6 +15,14 @@ $radmin = !empty($b['radmin_ok']) ? 1 : 0;
 $is_gate = $d['mode'] !== 'monitor';
 
 if (!$was_online) log_event($d['id'], 'info', "{$d['name']} online");
+// Satu ID laptop dipakai lebih dari satu komputer (agent hasil salin / config.json sama): heartbeat datang bergantian
+// dari hostname berbeda, sehingga laptop yang sudah mati tetap tampil online. Dicatat paling sering 10 menit sekali.
+$host_in = substr($b['hostname'] ?? '', 0, 100);
+if ($was_online && $host_in !== '' && (string)$d['hostname'] !== '' && $host_in !== $d['hostname']) {
+    $st = $pdo->prepare("SELECT COUNT(*) FROM logs WHERE device_id=? AND message LIKE '%dipakai lebih dari satu komputer%' AND created_at > NOW() - INTERVAL 10 MINUTE");
+    $st->execute([$d['id']]);
+    if (!$st->fetchColumn()) log_event($d['id'], 'warn', "{$d['name']}: ID {$d['device_key']} dipakai lebih dari satu komputer ({$d['hostname']} dan $host_in, IP " . ($_SERVER['REMOTE_ADDR'] ?? '?') . "). Laptop yang mati bisa tetap tampil online.");
+}
 if ($is_gate && $was_online) {
     if ($d['browser_running'] && !$browser) log_event($d['id'], 'warn', "{$d['name']}: browser gate tertutup");
     if (!$d['browser_running'] && $browser) log_event($d['id'], 'info', "{$d['name']}: browser gate aktif");
