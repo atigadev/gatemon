@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 2;   // 2 = wallpaper (agent 1.9)
+const SCHEMA_VERSION = 3;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10)
 
 function schema_version(PDO $pdo) {
     try {
@@ -87,8 +87,12 @@ function schema_apply(PDO $pdo) {
   net_ms INT NULL,
   radmin_ok TINYINT NOT NULL DEFAULT 0,
   agent_version VARCHAR(20) NULL,
+  wallpaper_id INT NULL,
   wallpaper_sha VARCHAR(64) NULL,
   wallpaper_err VARCHAR(200) NULL,
+  power_state VARCHAR(20) NULL,
+  winupdate_state VARCHAR(10) NULL,
+  policy_err VARCHAR(200) NULL,
   last_seen DATETIME NULL,
   created_at DATETIME NOT NULL");
     // Upgrade database lama: tambahkan kolom yang belum ada
@@ -106,6 +110,10 @@ function schema_apply(PDO $pdo) {
     $add('devices', $d, 'category_id', "ADD category_id INT NULL AFTER gate");
     // Wallpaper yang terpasang di laptop (agent >= 1.9)
     $add('devices', $d, 'wallpaper_sha', "ADD wallpaper_sha VARCHAR(64) NULL, ADD wallpaper_err VARCHAR(200) NULL");
+    // Wallpaper khusus laptop ini (NULL = ikut kategori/bawaan, 0 = jangan ubah, id = wallpaper tertentu) (agent >= 1.9)
+    $add('devices', $d, 'wallpaper_id', "ADD wallpaper_id INT NULL AFTER agent_version");
+    // Kebijakan daya & Windows Update yang sedang berlaku di laptop (agent >= 1.10)
+    $add('devices', $d, 'power_state', "ADD power_state VARCHAR(20) NULL, ADD winupdate_state VARCHAR(10) NULL, ADD policy_err VARCHAR(200) NULL");
     // gate_url boleh berisi beberapa URL (1 per baris): dibuka berdampingan kiri-kanan oleh agent >= 1.8
     if (stripos($d['gate_url'] ?? '', 'varchar(2000)') === false) {
         $pdo->exec("ALTER TABLE devices MODIFY gate_url VARCHAR(2000) NOT NULL DEFAULT ''");

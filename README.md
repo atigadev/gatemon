@@ -91,10 +91,21 @@ pasang ulang sekali lewat `/install/ID-LAPTOP`, setelah itu update cukup dari se
 - **Rollback otomatis**: bila versi baru tidak berhasil tersambung ke server dalam 150 detik, skrip penjaga
   mengembalikan versi lama, menjalankannya lagi, dan status laptop menjadi "Gagal: ... kembali ke versi lama".
 
+## Daya & Windows Update laptop (agent 1.10+)
+Menu **Daya** mengatur dua hal untuk semua laptop dari server (global, "Jangan ubah" = GateMon tidak menyentuh).
+Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
+- **Rencana daya**: Selalu aktif (tidak tidur, layar tetap menyala - untuk laptop gate), Seimbang, atau Hemat daya.
+  Diterapkan ke rencana daya aktif (AC &amp; baterai) lewat `powercfg /change`.
+- **Windows Update**: Aktif / Nonaktif. Nonaktif menghentikan & men-disable layanan (`wuauserv`, `UsoSvc`, `WaaSMedicSvc`)
+  dan menyetel policy `NoAutoUpdate=1`, agar laptop tidak mengunduh/restart saat acara. Aktif mengembalikannya.
+- Agent menerapkan hanya saat nilainya berubah (disimpan di `policy-state.json`) dan melaporkan status lewat heartbeat.
+  Tabel status per laptop: Diterapkan / Sedang diterapkan / Menunggu online / Gagal / Perlu agent 1.10+.
+
 ## Wallpaper laptop (agent 1.9+)
 - Menu **Wallpaper**: unggah gambar JPG/PNG (maks. 10 MB, min. 640x480) ke pustaka, lalu atur **wallpaper bawaan**
   untuk semua laptop dan bila perlu wallpaper lain **per kategori** ("Ikut bawaan" / "Jangan ubah" / gambar tertentu),
   posisi gambar (Fill/Fit/Stretch/Center/Tile/Span), dan **Kunci wallpaper** (bila petugas menggantinya, agent memasang kembali).
+- Bisa juga diatur **per laptop** di form tambah/edit di menu Devices (berlapis: laptop → kategori → bawaan).
 - Heartbeat hanya membawa sha256 wallpaper; agent mengunduh file sekali saat berubah lewat `api/wallpaper.php`
   (token laptop, hanya file milik laptop itu), mencocokkan sha256, lalu memasangnya. Gagal → dicoba lagi tiap 60 detik.
 - Wallpaper asli laptop dicatat; bila diubah ke "Jangan ubah", agent mengembalikannya.

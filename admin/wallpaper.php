@@ -83,13 +83,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
         } elseif ($act === 'delete') {
             $id = (int)($_POST['id'] ?? 0);
             $cfg = wallpaper_cfg();
-            $st = $pdo->prepare("SELECT COUNT(*) FROM categories WHERE wallpaper_id=?");
-            $st->execute([$id]);
+            $st = $pdo->prepare("SELECT (SELECT COUNT(*) FROM categories WHERE wallpaper_id=?) + (SELECT COUNT(*) FROM devices WHERE wallpaper_id=?)");
+            $st->execute([$id, $id]);
             $w = $pdo->prepare("SELECT * FROM wallpapers WHERE id=?");
             $w->execute([$id]);
             $w = $w->fetch();
             if (!$w) $err = 'Wallpaper tidak ditemukan.';
-            elseif ($cfg['default'] === $id || $st->fetchColumn()) $err = "Wallpaper {$w['name']} masih dipakai. Ganti dulu di bagian Penerapan, lalu hapus.";
+            elseif ($cfg['default'] === $id || $st->fetchColumn()) $err = "Wallpaper {$w['name']} masih dipakai (kategori atau laptop). Ganti dulu, lalu hapus.";
             else {
                 $pdo->prepare("DELETE FROM wallpapers WHERE id=?")->execute([$id]);
                 @unlink(wallpaper_path($w));
@@ -109,21 +109,21 @@ $wps = $pdo->query("SELECT * FROM wallpapers ORDER BY id DESC")->fetchAll();
 $byId = array_column($wps, null, 'id');
 $cats = $pdo->query("SELECT c.id, c.name, c.color, c.wallpaper_id, (SELECT COUNT(*) FROM devices d WHERE d.category_id=c.id) AS n FROM categories c ORDER BY c.sort, c.name")->fetchAll();
 $catById = array_column($cats, null, 'id');
-$devs = $pdo->query("SELECT d.id, d.name, d.device_key, d.category_id, d.agent_version, d.wallpaper_sha, d.wallpaper_err, d.last_seen FROM devices d
+$devs = $pdo->query("SELECT d.id, d.name, d.device_key, d.category_id, d.wallpaper_id, d.agent_version, d.wallpaper_sha, d.wallpaper_err, d.last_seen FROM devices d
     LEFT JOIN categories c ON c.id=d.category_id ORDER BY c.sort IS NULL, c.sort, c.name, d.name")->fetchAll();
 
 // pemakaian tiap wallpaper (label di pustaka)
 $usage = [];
 if ($cfg['default']) $usage[$cfg['default']][] = 'Bawaan semua laptop';
 foreach ($cats as $c) if ($c['wallpaper_id']) $usage[(int)$c['wallpaper_id']][] = $c['name'];
+foreach ($devs as $dv) if (!empty($dv['wallpaper_id'])) $usage[(int)$dv['wallpaper_id']][] = $dv['name'];
 
 // status per laptop, dihitung dengan aturan yang sama seperti wallpaper_for()
 $offline_after = setting('offline_after');
 $sum = ['target' => 0, 'ok' => 0];
 foreach ($devs as &$d) {
-    $c = $catById[$d['category_id']] ?? null;
-    $tid = $c && $c['wallpaper_id'] !== null ? (int)$c['wallpaper_id'] : $cfg['default'];
-    $d['target'] = $byId[$tid] ?? null;
+    $tid = wallpaper_target_id($d);   // laptop -> kategori -> bawaan
+    $d['target'] = $tid > 0 ? ($byId[$tid] ?? null) : null;
     $online = $d['last_seen'] && time() - strtotime($d['last_seen']) <= $offline_after;
     if (!$d['target']) {
         [$d['st'], $d['label']] = (string)$d['wallpaper_sha'] !== '' ? ['pending', 'Mengembalikan wallpaper asli'] : ['none', 'Tidak diatur'];

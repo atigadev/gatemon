@@ -279,17 +279,44 @@ function wallpaper_cfg() {
         'lock' => (int)($s['wallpaper_lock'] ?? 0)];
 }
 function wallpaper_path($w) { return WALLPAPER_DIR . '/' . $w['sha256'] . '.' . $w['ext']; }
-// Wallpaper untuk satu laptop: wallpaper kategorinya (NULL = ikut bawaan, 0 = jangan ubah), selain itu bawaan.
-// null = GateMon tidak mengatur wallpaper laptop ini (agent mengembalikan wallpaper aslinya).
+// id wallpaper tujuan untuk satu laptop, berlapis: laptop -> kategori -> bawaan.
+// Di tiap lapis: NULL = ikut lapis berikutnya, 0 = jangan ubah (berhenti), >0 = wallpaper tertentu.
+// Kembali: >0 id wallpaper, atau 0 = GateMon tidak mengatur wallpaper laptop ini.
+function wallpaper_target_id($d) {
+    $dev = $d['wallpaper_id'] ?? null;
+    if ($dev !== null && $dev !== '') return (int)$dev;                 // khusus laptop (0 atau id)
+    if (!empty($d['category_id'])) {
+        $st = db()->prepare("SELECT wallpaper_id FROM categories WHERE id=?");
+        $st->execute([$d['category_id']]);
+        $cat = $st->fetchColumn();
+        if ($cat !== false && $cat !== null) return (int)$cat;          // ikut kategori (0 atau id)
+    }
+    return wallpaper_cfg()['default'];                                   // bawaan (0 atau id)
+}
+// Baris wallpaper untuk laptop, atau null (tidak diatur / tabel belum ada / wallpaper terhapus).
 function wallpaper_for($d) {
-    $c = wallpaper_cfg();
     try {
-        $st = db()->prepare("SELECT id, name, sha256, ext, bytes FROM wallpapers WHERE id = IFNULL((SELECT wallpaper_id FROM categories WHERE id=?), ?)");
-        $st->execute([$d['category_id'] ?? 0, $c['default']]);
+        $id = wallpaper_target_id($d);
+        if ($id <= 0) return null;
+        $st = db()->prepare("SELECT id, name, sha256, ext, bytes FROM wallpapers WHERE id=?");
+        $st->execute([$id]);
         $w = $st->fetch();
     } catch (Exception $e) { return null; }   // tabel belum ada (setup.php belum dijalankan)
     return $w ?: null;
 }
+
+// ---------- kebijakan daya & Windows Update (agent >= 1.10, menu Daya) ----------
+// Global, disimpan di tabel settings (power_mode, winupdate), di luar settings_spec. "" = jangan ubah.
+const POWER_MODES = ['' => 'Jangan ubah (biarkan apa adanya)', 'always_on' => 'Selalu aktif - tidak tidur, layar tetap menyala',
+    'balanced' => 'Seimbang - layar mati 10 mnt, tidur 30 mnt', 'saver' => 'Hemat daya - layar mati 5 mnt, tidur 15 mnt'];
+const WINUPDATE_MODES = ['' => 'Jangan ubah (biarkan apa adanya)', 'on' => 'Aktifkan Windows Update', 'off' => 'Nonaktifkan Windows Update'];
+function policy_cfg() {
+    $s = settings_all();
+    $p = (string)($s['power_mode'] ?? '');
+    $w = (string)($s['winupdate'] ?? '');
+    return ['power' => isset(POWER_MODES[$p]) ? $p : '', 'winupdate' => isset(WINUPDATE_MODES[$w]) ? $w : ''];
+}
+const POLICY_MIN = '1.10.0';   // agent mulai versi ini menerapkan kebijakan daya & Windows Update
 
 // ---------- Wake-on-LAN (agent >= 1.7) ----------
 // MAC valid -> "AA:BB:CC:DD:EE:FF", selain itu null (MAC kosong/broadcast/multicast ditolak)

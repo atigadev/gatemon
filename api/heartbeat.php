@@ -80,6 +80,17 @@ if (isset($b['wallpaper'])) {
     }
 }
 
+// Kebijakan daya & Windows Update yang sedang berlaku di laptop (agent >= 1.10); ditulis hanya bila berubah
+if (isset($b['power_state']) || isset($b['winupdate_state']) || isset($b['policy_err'])) {
+    $ps = substr((string)($b['power_state'] ?? ''), 0, 20);
+    $ws = substr((string)($b['winupdate_state'] ?? ''), 0, 10);
+    $pe = mb_substr((string)($b['policy_err'] ?? ''), 0, 200);
+    if ($ps !== (string)$d['power_state'] || $ws !== (string)$d['winupdate_state'] || $pe !== (string)$d['policy_err']) {
+        $pdo->prepare("UPDATE devices SET power_state=?, winupdate_state=?, policy_err=? WHERE id=?")->execute([$ps, $ws, $pe, $d['id']]);
+        if ($pe !== '' && $pe !== (string)$d['policy_err']) log_event($d['id'], 'warn', "{$d['name']}: kebijakan daya/Windows Update gagal ($pe)");
+    }
+}
+
 // Hasil update agent (>= 1.9) setelah restart: "ok:LAMA>BARU" atau "fail:BARU:alasan" (penjaga mengembalikan versi lama).
 // Dicatat di log dan pada perintah UPDATE_AGENT terakhir laptop ini (status di menu Agent).
 if (isset($b['update_result']) && preg_match('/^(ok|fail):(.{0,240})$/s', (string)$b['update_result'], $um)) {
@@ -130,7 +141,7 @@ $gate_url = $gate_urls ? $gate_urls[0] : '';
 $w = wallpaper_for($d);
 $wc = wallpaper_cfg();
 $wallpaper = $w ? ['sha' => $w['sha256'], 'ext' => $w['ext'], 'bytes' => (int)$w['bytes'], 'style' => $wc['style'], 'lock' => $wc['lock']] : null;
-json_out(['ok' => true, 'wallpaper' => $wallpaper, 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
+json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
     'auto_open' => setting('auto_open_gate'), 'auto_reopen' => setting('auto_reopen_gate'), 'reopen_after' => setting('reopen_after'),
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),

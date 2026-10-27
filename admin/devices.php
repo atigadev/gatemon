@@ -9,6 +9,24 @@ $form_err = null; // isi form tambah yang gagal disimpan (modal dibuka lagi deng
 const MODES = ['gate' => 'Gate (browser + halaman gate)', 'monitor' => 'Monitor koneksi saja'];
 function post_mode() { return ($_POST['mode'] ?? '') === 'monitor' ? 'monitor' : 'gate'; }
 $cats = $pdo->query("SELECT id, name, color FROM categories ORDER BY sort, name")->fetchAll();
+$wallpapers = $pdo->query("SELECT id, name, width, height FROM wallpapers ORDER BY id DESC")->fetchAll();
+$wp_ids = array_column($wallpapers, 'id');
+// wallpaper laptop: '' = ikut kategori/bawaan (NULL), '0' = jangan ubah, id = wallpaper tertentu
+function post_wallpaper() {
+    global $wp_ids;
+    $v = $_POST['wallpaper_id'] ?? '';
+    if ($v === '' || $v === null) return null;
+    $v = (int)$v;
+    return ($v === 0 || in_array($v, array_map('intval', $wp_ids), true)) ? $v : null;
+}
+function wp_select($form, $cur) {
+    global $wallpapers;
+    $cur = ($cur === null || $cur === '') ? '' : (string)(int)$cur;
+    $o = '<option value=""' . ($cur === '' ? ' selected' : '') . '>Ikut kategori / bawaan</option>'
+       . '<option value="0"' . ($cur === '0' ? ' selected' : '') . '>— Jangan ubah —</option>';
+    foreach ($wallpapers as $w) $o .= '<option value="' . $w['id'] . '"' . ($cur === (string)$w['id'] ? ' selected' : '') . '>' . h($w['name']) . " ({$w['width']}x{$w['height']})</option>";
+    return '<select name="wallpaper_id"' . ($form ? ' form="' . h($form) . '"' : '') . '>' . $o . '</select>';
+}
 // Live camera: cam_mode none -> '', auto -> 'auto' (Agent DVR di laptop itu, lihat camera_link()), custom -> URL (boleh {ip})
 // URL halaman gate: 1 per baris (maks GATE_URL_MAX). >1 URL = dibuka berdampingan kiri-kanan. Kosong = URL default.
 function post_gate_urls() {
@@ -50,8 +68,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
         else {
             $token = bin2hex(random_bytes(16));
             try {
-                $pdo->prepare("INSERT INTO devices (device_key,name,gate,category_id,gate_url,mode,camera_url,token,created_at) VALUES (?,?,?,?,?,?,?,?,NOW())")
-                    ->execute([$key, trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_cam(), $token]);
+                $pdo->prepare("INSERT INTO devices (device_key,name,gate,category_id,gate_url,mode,camera_url,wallpaper_id,token,created_at) VALUES (?,?,?,?,?,?,?,?,?,NOW())")
+                    ->execute([$key, trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_cam(), post_wallpaper(), $token]);
                 $msg = "Laptop $key ditambahkan.";
             } catch (Exception $e) { $msg = "ID laptop $key sudah ada."; $form_err = $_POST; }
         }
@@ -62,8 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
     } elseif ($act === 'edit' && cam_invalid()) {
         $msg = 'URL kamera tidak valid, harus diawali http:// atau https://';
     } elseif ($act === 'edit') {
-        $pdo->prepare("UPDATE devices SET name=?, gate=?, category_id=?, gate_url=?, mode=?, camera_url=? WHERE id=?")
-            ->execute([trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_cam(), (int)$_POST['id']]);
+        $pdo->prepare("UPDATE devices SET name=?, gate=?, category_id=?, gate_url=?, mode=?, camera_url=?, wallpaper_id=? WHERE id=?")
+            ->execute([trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_cam(), post_wallpaper(), (int)$_POST['id']]);
         $msg = 'Disimpan.';
     } elseif ($act === 'enroll') {
         // Kode instalasi sekali pakai: username = ID laptop, password acak (tanpa huruf/angka yang mirip)
@@ -169,7 +187,8 @@ topbar('devices', 'Monitoring Laptop');
         $st = device_state($d, setting('offline_after'));
         $cat = $d['category_color'] ?: '#64748b';
         $data = ['id' => (int)$d['id'], 'device_key' => $d['device_key'], 'name' => $d['name'], 'gate' => $d['gate'],
-                 'category_id' => (int)$d['category_id'], 'mode' => $d['mode'], 'gate_url' => $d['gate_url'], 'camera_url' => $d['camera_url']];
+                 'category_id' => (int)$d['category_id'], 'mode' => $d['mode'], 'gate_url' => $d['gate_url'], 'camera_url' => $d['camera_url'],
+                 'wallpaper_id' => $d['wallpaper_id'] === null ? '' : (string)(int)$d['wallpaper_id']];
         $search = strtolower($d['device_key'] . ' ' . $d['name'] . ' ' . $d['gate'] . ' ' . $d['ip'] . ' ' . $d['hostname'] . ' ' . $d['category_name']);
     ?>
     <tr data-cat="<?= $d['category_id'] ? (int)$d['category_id'] : 'none' ?>" data-q="<?= h($search) ?>">
@@ -228,6 +247,9 @@ topbar('devices', 'Monitoring Laptop');
       <label>Nama <input name="name" id="f-name" placeholder="Laptop Gate 3" required value="<?= h($fe['name'] ?? '') ?>"></label>
       <label>Kategori <?= cat_select('', (int)($fe['category_id'] ?? 0), false) ?></label>
       <label>Gate / pos <input name="gate" id="f-gate" placeholder="Gate Utara" value="<?= h($fe['gate'] ?? '') ?>"></label>
+      <label class="full">Wallpaper <?= wp_select('', $fe['wallpaper_id'] ?? '') ?>
+        <small class="hint">Khusus laptop ini. <b>Ikut kategori / bawaan</b> = sesuai pengaturan di menu Wallpaper.
+          Unggah gambar di menu <b>Wallpaper</b> dulu. Butuh agent 1.9+.</small></label>
       <div class="full field">
         <span class="field-lbl">Mode</span>
         <div class="seg">
@@ -281,4 +303,4 @@ if ($show && $sup):
   </div>
 </div>
 <?php endif; ?>
-<?php page_foot(['devices.js?v=5']);
+<?php page_foot(['devices.js?v=6']);

@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -258,6 +258,9 @@ def collect():
         "agent_version": VERSION,
         "wallpaper": _wp_state().get("sha", ""),
         "wallpaper_err": _wp["err"],
+        "power_state": _pol_state().get("power", ""),
+        "winupdate_state": _pol_state().get("winupdate", ""),
+        "policy_err": _pol["err"],
         **({"update_result": _upd["result"]} if _upd["result"] else {}),
     }
 
@@ -403,6 +406,94 @@ def wallpaper_sync(want):
             return
         log.info("wallpaper diganti di laptop, dipasang kembali (dikunci server)")
     _wp_run(_wp_apply, sha, path, style, int(want.get("bytes") or 0))
+
+
+# ---------- kebijakan daya & Windows Update (menu Daya) ----------
+# Server mengirim {"power": ..., "winupdate": ...} tiap heartbeat; "" = jangan ubah. Agent menerapkan hanya saat
+# berubah (yang terakhir diterapkan disimpan di policy-state.json) lewat powercfg dan service wuauserv. Perlu Administrator.
+POL_STATE = os.path.join(BASE, "policy-state.json")
+_pol = {"busy": False, "err": "", "state": None}
+# menit timeout untuk rencana daya yang sedang aktif: (monitor-ac, monitor-dc, standby-ac, standby-dc, hibernate-ac, hibernate-dc)
+POWER_PLANS = {
+    "always_on": (0, 0, 0, 0, 0, 0),
+    "balanced": (10, 5, 30, 15, 0, 0),
+    "saver": (5, 2, 15, 10, 20, 15),
+}
+WU_SERVICES = ("wuauserv", "UsoSvc", "WaaSMedicSvc")   # layanan Windows Update
+WU_AU_KEY = r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+
+
+def _pol_state():
+    if _pol["state"] is None:
+        try:
+            with open(POL_STATE, encoding="utf-8") as f:
+                _pol["state"] = json.load(f)
+        except Exception:
+            _pol["state"] = {}
+    return _pol["state"]
+
+
+def _run(args, ok_rc=(0,)):
+    r = subprocess.run(args, capture_output=True, text=True, timeout=120,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if r.returncode not in ok_rc:
+        raise RuntimeError("%s (rc=%s) %s" % (args[0] if not isinstance(args, str) else args, r.returncode, (r.stderr or r.stdout).strip()[:160]))
+    return r
+
+
+def apply_power(mode):
+    keys = ("monitor-timeout-ac", "monitor-timeout-dc", "standby-timeout-ac", "standby-timeout-dc",
+            "hibernate-timeout-ac", "hibernate-timeout-dc")
+    for k, v in zip(keys, POWER_PLANS[mode]):
+        _run(["powercfg", "/change", k, str(v)])
+
+
+def apply_winupdate(state):
+    if state == "off":
+        for svc in WU_SERVICES:
+            _run(["sc", "config", svc, "start=", "disabled"], ok_rc=(0, 1060, 1072))   # 1060/1072 = layanan tidak ada/ditandai hapus
+            _run(["sc", "stop", svc], ok_rc=(0, 1062, 1060, 1072))                      # 1062 = memang belum jalan
+        _run(["reg", "add", WU_AU_KEY, "/v", "NoAutoUpdate", "/t", "REG_DWORD", "/d", "1", "/f"])
+    else:   # on: kembalikan ke bawaan (manual/otomatis) dan cabut kebijakan NoAutoUpdate
+        _run(["reg", "add", WU_AU_KEY, "/v", "NoAutoUpdate", "/t", "REG_DWORD", "/d", "0", "/f"])
+        for svc, start in (("wuauserv", "demand"), ("UsoSvc", "delayed-auto"), ("WaaSMedicSvc", "demand")):
+            _run(["sc", "config", svc, "start=", start], ok_rc=(0, 1060, 1072))
+        _run(["sc", "start", "wuauserv"], ok_rc=(0, 1056, 1060, 1072))                  # 1056 = sudah jalan
+
+
+def policy_sync(pol):
+    if not IS_WIN or _pol["busy"] or not isinstance(pol, dict):
+        return
+    power = pol.get("power") if pol.get("power") in POWER_PLANS else ""
+    wu = pol.get("winupdate") if pol.get("winupdate") in ("on", "off") else ""
+    st = _pol_state()
+    todo = []
+    if power and st.get("power") != power:
+        todo.append(("power", power, lambda: apply_power(power)))
+    if wu and st.get("winupdate") != wu:
+        todo.append(("winupdate", wu, lambda: apply_winupdate(wu)))
+    if not todo:
+        return
+
+    def _go():
+        errs = []
+        for key, val, fn in todo:
+            try:
+                fn()
+                _pol_state()[key] = val
+                log.info("kebijakan %s -> %s diterapkan", key, val)
+            except Exception as e:
+                errs.append(str(e)[:120])
+                log.warning("kebijakan %s gagal: %s", key, e)
+        try:
+            with open(POL_STATE, "w", encoding="utf-8") as f:
+                json.dump(_pol["state"], f)
+        except OSError:
+            pass
+        _pol["err"] = " | ".join(errs)[:200]
+        _pol["busy"] = False
+    _pol["busy"] = True
+    threading.Thread(target=_go, daemon=True).start()   # powercfg/sc tidak menahan heartbeat
 
 
 # ---------- update agent dari server (menu Agent) ----------
@@ -1103,6 +1194,8 @@ def main():
                 auto_gate(j)
                 if "wallpaper" in j:                             # server lama tidak mengirim: wallpaper tidak disentuh
                     wallpaper_sync(j["wallpaper"])
+                if "policy" in j:                                # daya & Windows Update (server lama tidak mengirim)
+                    policy_sync(j["policy"])
             if _upd["restart"]:
                 restart_for_update()                             # hasil update sudah dilaporkan; penjaga mengambil alih
         except Exception as e:

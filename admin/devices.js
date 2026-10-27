@@ -26,6 +26,8 @@
       modal.querySelectorAll('input[name=cam_mode]').forEach(r => r.checked = r.value === cm);
       $('f-cam').value = cm === 'custom' ? cu : '';
       modal.querySelector('select[name=category_id]').value = String(d.category_id || 0);
+      const wp = modal.querySelector('select[name=wallpaper_id]');
+      if(wp) wp.value = d.wallpaper_id || '';
       modal.querySelectorAll('input[name=mode]').forEach(r => r.checked = r.value === d.mode);
       modal.querySelectorAll('.notice.error').forEach(n => n.remove());
     }
