@@ -1,0 +1,17 @@
+FOLDER INI = FILE TAMBAHAN UNTUK INSTALASI AGENT (ikut otomatis di paket /install/ID-LAPTOP dan ZIP installer)
+
+1. Installer Python (python-*.exe)
+   File installer Windows 64-bit dari python.org, contoh: python-3.15.0-amd64.exe
+   Dipasang otomatis (tanpa jendela, semua user, masuk PATH) bila laptop belum punya Python 3.9 - 3.15 64-bit.
+
+2. Folder wheels\  = semua library agent untuk instalasi OFFLINE (tanpa internet)
+   Berisi psutil, requests (+ certifi, charset_normalizer, idna, urllib3) dan Pillow
+   untuk CPython 3.9 - 3.15 Windows 64-bit, diunduh resmi dari PyPI.
+   wheels\SHA256SUMS.txt = daftar hash. Installer memeriksa SEMUA file sebelum memasang:
+   file yang berubah, rusak, atau tidak terdaftar -> instalasi dihentikan.
+   JANGAN menambah/mengganti file di folder wheels secara manual.
+
+   Memperbarui wheels (mis. setelah requirements.txt berubah), di laptop server yang ada internet + Python:
+       powershell -ExecutionPolicy Bypass -File ..\buat-wheels.ps1
+   Hanya menghitung ulang SHA256SUMS.txt:
+       powershell -ExecutionPolicy Bypass -File ..\buat-wheels.ps1 -HashOnly

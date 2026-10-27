@@ -1,0 +1,2 @@
+# File wallpaper hanya diambil agent lewat api/wallpaper.php (pakai token) dan admin lewat admin/wallpaper_img.php
+Require all denied

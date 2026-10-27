@@ -1,0 +1,11 @@
+{
+  "server_url": "http://192.168.1.10/gatemon",
+  "device_key": "G003",
+  "token": "ISI_DARI_MENU_DEVICES",
+  "gate_url": "",
+  "browser": "chrome",
+  "kiosk": true,
+  "interval": 5,
+  "radmin_process": "rserver3.exe",
+  "radmin_port": 4899
+}

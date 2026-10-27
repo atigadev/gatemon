@@ -1,0 +1,26 @@
+# GateMon - pengamanan akses web (Apache 2.4)
+
+# Jangan tampilkan daftar isi folder
+Options -Indexes
+DirectoryIndex index.php
+
+# File konfigurasi/library: hanya di-include PHP, tidak boleh dibuka langsung
+<FilesMatch "^(config|db)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Dokumen, skrip, dan data yang tidak perlu disajikan web
+<FilesMatch "\.(md|json|py|bat|reg|txt|log|ini|sql|bak|zip)$|^\.">
+    Require all denied
+</FilesMatch>
+
+# setup.php hanya boleh dijalankan dari laptop server itu sendiri
+<Files "setup.php">
+    Require local
+</Files>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+</IfModule>

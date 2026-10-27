@@ -1,0 +1,4 @@
+# Library yang hanya di-include oleh halaman lain
+<FilesMatch "^(auth|layout)\.php$">
+    Require all denied
+</FilesMatch>

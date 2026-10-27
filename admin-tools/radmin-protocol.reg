@@ -1,0 +1,13 @@
+Windows Registry Editor Version 5.00
+
+; GateMon: cara MANUAL mendaftarkan link radmin:// (cara mudah: tombol "Pasang link Radmin" di dashboard).
+; 1. Salin radmin-launch.ps1 ke  C:\gatemon-admin\radmin-launch.ps1
+; 2. Klik dua kali file ini (hanya untuk user Windows ini, tanpa hak Administrator).
+; Peluncur memvalidasi alamat sebelum Radmin Viewer dijalankan.
+
+[HKEY_CURRENT_USER\Software\Classes\radmin]
+@="URL:Radmin Protocol"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\radmin\shell\open\command]
+@="powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"C:\gatemon-admin\radmin-launch.ps1\" \"%1\""

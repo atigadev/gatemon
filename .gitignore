@@ -1,0 +1,13 @@
+# File runtime / lokal (tidak ikut repo)
+__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak-*
+agent/config.json
+agent/browser-profile/
+# salinan database (berisi hash password & token laptop)
+migrasi/*.sql
+# gambar wallpaper yang diunggah (dikelola dari menu Wallpaper)
+wallpaper/*
+!wallpaper/.htaccess

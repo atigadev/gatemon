@@ -1,0 +1,22 @@
+GATEMON - PAKET PINDAH / CADANGKAN SERVER
+
+Isi paket:
+  INSTALL-SERVER.bat   installer untuk server tujuan (Windows + XAMPP)
+  gatemon\             seluruh aplikasi (kode, config.php, agent, installer Python + wheels)
+  gatemon\migrasi\database.sql   salinan database (laptop, kategori, pengaturan, akun admin, token, riwayat)
+
+LANGKAH DI SERVER TUJUAN
+1. Pasang XAMPP (PHP 7.4+). Buka XAMPP Control Panel, Start Apache dan MySQL.
+2. Ekstrak ZIP ini, lalu klik dua kali INSTALL-SERVER.bat.
+   - Folder htdocs\gatemon lama (bila ada) dipindah ke htdocs\gatemon-lama-TANGGAL.
+   - Database diimpor. Bila database tujuan sudah berisi data, akan ditanya dulu dan data lama dicadangkan
+     ke gatemon\migrasi\backup-....sql.
+   - Ditawarkan: aktifkan ekstensi PHP zip dan KeepAliveTimeout 15 (file asli dicadangkan .bak-...).
+   - database.sql dihapus setelah impor.
+3. Restart Apache, buka http://localhost/gatemon/setup.php (pemeriksaan sistem), lalu hapus setup.php.
+4. Login dengan akun yang sama seperti di server lama.
+
+PENTING
+- Agent di laptop gate menyimpan alamat server lama. Paling mudah: beri server baru IP yang SAMA dengan
+  server lama (IP statis / DHCP reservation). Bila IP berbeda, pasang ulang agent lewat /install/ID-LAPTOP.
+- Paket ini berisi hash password, token laptop, dan data lain: simpan di tempat aman, hapus setelah dipakai.
