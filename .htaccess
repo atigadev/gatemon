@@ -4,6 +4,9 @@
 Options -Indexes
 DirectoryIndex index.php
 
+# Folder repo git (.git/) berisi seluruh kode & riwayat: jangan pernah disajikan web
+RedirectMatch 404 /\.git(/|$)
+
 # File konfigurasi/library: hanya di-include PHP, tidak boleh dibuka langsung
 <FilesMatch "^(config|db)\.php$">
     Require all denied
