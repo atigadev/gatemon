@@ -77,6 +77,10 @@ if ($tables) {
 // ---------- 3. impor ----------
 $n = db_import_sql($pdo, $sql);
 say("Impor selesai: $n perintah SQL.");
+// database dari server lama bisa berversi lebih lama dari kode ini: lengkapi struktur sekarang
+require_once $app . DIRECTORY_SEPARATOR . 'schema.php';
+$mig = db_migrate($pdo);
+say('Struktur database versi ' . SCHEMA_VERSION . ($mig ? ': ' . implode(', ', $mig) : ' (sudah sesuai)') . '.');
 foreach (['devices' => 'laptop', 'categories' => 'kategori', 'admins' => 'akun admin', 'settings' => 'pengaturan', 'scans' => 'scan', 'logs' => 'log'] as $t => $l) {
     try { say(sprintf('  %-12s %d', $l, $pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn())); } catch (Exception $e) {}
 }

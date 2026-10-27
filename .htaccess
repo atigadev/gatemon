@@ -8,7 +8,7 @@ DirectoryIndex index.php
 RedirectMatch 404 /\.git(/|$)
 
 # File konfigurasi/library: hanya di-include PHP, tidak boleh dibuka langsung
-<FilesMatch "^(config|db)\.php$">
+<FilesMatch "^(config|db|schema)\.php$">
     Require all denied
 </FilesMatch>
 

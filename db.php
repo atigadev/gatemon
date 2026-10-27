@@ -11,6 +11,17 @@ function db() {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
+        // Struktur database mengikuti versi kode: setelah kode diperbarui (git pull / salin file), migrasi berjalan
+        // otomatis sekali pada request pertama, tanpa membuka setup.php. Gagal (mis. user MySQL tanpa hak ALTER)
+        // dicatat di error log PHP; setup.php menampilkan pesan lengkapnya.
+        require_once __DIR__ . '/schema.php';
+        if (schema_version($pdo) < SCHEMA_VERSION) {
+            try {
+                if ($done = db_migrate($pdo, true)) log_event(null, 'info', mb_substr('Struktur database diperbarui ke versi ' . SCHEMA_VERSION . ': ' . implode(', ', $done), 0, 500));
+            } catch (Exception $e) {
+                error_log('GateMon: migrasi database gagal: ' . $e->getMessage());
+            }
+        }
     }
     return $pdo;
 }

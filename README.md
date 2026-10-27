@@ -4,7 +4,7 @@ Web app untuk memantau dan mengendalikan laptop validasi gate di satu LAN event.
 Bukan sistem validasi: halaman validasi yang sudah ada (form-scanning-gate.php) tetap dipakai apa adanya.
 
 ## Struktur
-- `config.php`, `db.php`, `setup.php` - server (PHP 7.4+/8, MySQL)
+- `config.php`, `db.php`, `schema.php`, `setup.php` - server (PHP 7.4+/8, MySQL)
 - `api/` - endpoint untuk agent (heartbeat, result)
 - `admin/` - dashboard web (login, status, perintah, devices, admins)
 - `agent/` - agent Python untuk tiap laptop gate (Windows)
@@ -32,6 +32,16 @@ Bukan sistem validasi: halaman validasi yang sudah ada (form-scanning-gate.php) 
    Alternatif: **Installer umum (ZIP)** (login di jendela installer) atau **ZIP per laptop** (config.json berisi token, tanpa login).
 
 Manual lengkap ada di dokumen "Manual GateMon".
+
+## Update kode & database
+- Struktur database ada di `schema.php` (idempoten: tabel/kolom yang sudah ada dilewati, data tidak diubah).
+  Versinya disimpan di `settings.schema_version`.
+- Setelah kode diperbarui (`git pull` / salin file), **tidak perlu membuka `setup.php`**: request pertama ke server
+  menjalankan migrasi otomatis sekali (request lain yang bersamaan menunggu, tidak dobel), lalu mencatat di log
+  "Struktur database diperbarui ke versi N". Bila gagal (mis. user MySQL tanpa hak `ALTER`), pesan ada di error log PHP;
+  buka `setup.php` dari laptop server untuk melihat detailnya.
+- Kategori bawaan hanya dibuat untuk database baru; akun `admin`/`viewer` awal hanya dibuat `setup.php` bila belum ada akun.
+- Developer: setiap menambah tabel/kolom, tulis di `schema.php` dan **naikkan `SCHEMA_VERSION`**.
 
 ## Pindah / cadangkan server
 1. Di server lama: **Pengaturan → Pindah / cadangkan server → Unduh paket server** (hanya supervisor, tercatat di log).
