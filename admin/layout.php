@@ -43,7 +43,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=19">'
+       . '<link rel="stylesheet" href="style.css?v=20">'
        . '<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
@@ -57,6 +57,7 @@ function nav_items() {
         'devices'    => ['Devices', 'devices'],
         'categories' => ['Kategori', 'tag'],
         'wallpaper'  => ['Wallpaper', 'image'],
+        'agent_update' => ['Agent', 'download'],
         'admins'     => ['Admins', 'users'],
         'settings'   => ['Pengaturan', 'gear'],
     ];

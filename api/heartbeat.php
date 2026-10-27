@@ -80,6 +80,16 @@ if (isset($b['wallpaper'])) {
     }
 }
 
+// Hasil update agent (>= 1.9) setelah restart: "ok:LAMA>BARU" atau "fail:BARU:alasan" (penjaga mengembalikan versi lama).
+// Dicatat di log dan pada perintah UPDATE_AGENT terakhir laptop ini (status di menu Agent).
+if (isset($b['update_result']) && preg_match('/^(ok|fail):(.{0,240})$/s', (string)$b['update_result'], $um)) {
+    $ok = $um[1] === 'ok';
+    $txt = $ok ? 'update berhasil: ' . str_replace('>', ' -> ', $um[2]) : 'update gagal, kembali ke versi lama: ' . preg_replace('/^[^:]*:/', '', $um[2]);
+    log_event($d['id'], $ok ? 'info' : 'error', "{$d['name']}: $txt");
+    $pdo->prepare("UPDATE commands SET status=?, result=?, done_at=NOW() WHERE device_id=? AND type='UPDATE_AGENT' ORDER BY id DESC LIMIT 1")
+        ->execute([$ok ? 'done' : 'failed', mb_substr($txt, 0, 300), $d['id']]);
+}
+
 // Hasil scan dari halaman gate (agent >= 1.6), dikirim berkelompok bersama heartbeat.
 // Semua sid yang diterima dikembalikan (scans_ack) agar agent menghapusnya dari antrean; INSERT IGNORE
 // mencegah data dobel bila kiriman diulang setelah koneksi putus.

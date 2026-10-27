@@ -70,6 +70,27 @@ refresh dashboard/monitor, dan masa berlaku kode instalasi. Langsung berlaku: ag
 heartbeat berikutnya, dashboard yang terbuka ikut menyesuaikan. Nilai bawaan ada di `config.php`.
 Panel "Perkiraan beban" menghitung request/menit untuk server (penting di hosting bersama).
 
+## Update agent dari server (agent 1.9+)
+Agent diperbarui langsung dari menu **Agent**, tanpa memasang ulang. Agent di bawah 1.9 belum punya fitur ini:
+pasang ulang sekali lewat `/install/ID-LAPTOP`, setelah itu update cukup dari server.
+- **Keamanan**: rilis (`agent/release.json` = daftar file + sha256) ditandatangani **Ed25519** dengan kunci rahasia admin
+  yang disimpan di flashdisk, **bukan di server**. Agent memegang kunci publik (`UPDATE_PUBKEY` di `agent.py`) dan hanya
+  memasang rilis bertanda tangan sah, versinya lebih baru, dan setiap file cocok sha256-nya. Server yang dibobol atau
+  jaringan yang disadap tidak bisa memasang program ke laptop.
+- **Membuat rilis** (di PC yang memegang kunci, butuh PHP dari XAMPP):
+  1. Sekali: `admin-tools\rilis-agent.bat kunci-baru E:\gatemon-update.key` (kunci publik ditulis ke `agent.py`).
+     Simpan cadangan kunci; bila hilang, semua laptop harus dipasang ulang manual dengan kunci baru.
+  2. Tiap versi: naikkan `VERSION` di `agent/agent.py`, lalu `admin-tools\rilis-agent.bat tanda-tangan E:\gatemon-update.key`.
+     Alat menolak kunci yang tidak cocok, kunci di dalam folder GateMon, dan agent.py yang berubah tanpa naik versi.
+  3. Commit `agent/release.json` + `agent/release.sig`.
+- **Mengirim**: menu Agent → pilih laptop → **Update yang dipilih** (coba 1 laptop dulu) atau **Update semua**.
+  Laptop offline mengambil perintah saat online. Status per laptop: Terbaru / Perlu update / Sedang update / Gagal.
+- **Di laptop**: agent mengunduh lewat `api/update.php` (token laptop), memeriksa tanda tangan & sha256, memasang library
+  baru bila `requirements.txt` berubah (pip offline dari wheel bertanda tangan), mencadangkan versi lama ke `update\lama\`,
+  lalu restart lewat tugas terjadwal. Heartbeat tetap jalan selama mengunduh.
+- **Rollback otomatis**: bila versi baru tidak berhasil tersambung ke server dalam 150 detik, skrip penjaga
+  mengembalikan versi lama, menjalankannya lagi, dan status laptop menjadi "Gagal: ... kembali ke versi lama".
+
 ## Wallpaper laptop (agent 1.9+)
 - Menu **Wallpaper**: unggah gambar JPG/PNG (maks. 10 MB, min. 640x480) ke pustaka, lalu atur **wallpaper bawaan**
   untuk semua laptop dan bila perlu wallpaper lain **per kategori** ("Ikut bawaan" / "Jangan ubah" / gambar tertentu),

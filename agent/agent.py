@@ -3,11 +3,14 @@ GateMon Agent - dipasang di setiap laptop gate (Windows).
 Tiap beberapa detik melapor ke server dan menjalankan perintah dari dashboard.
 Jalankan dengan pythonw.exe agar tidak ada jendela hitam.
 """
-import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, platform, re, socket, subprocess, sys, threading, time
+import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, platform, re, shutil, socket, subprocess, sys, threading, time
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
 VERSION = "1.9.0"
+# Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
+# Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
+UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
 BASE = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(BASE, "config.json")
 LOG_PATH = os.path.join(BASE, "agent.log")
@@ -255,6 +258,7 @@ def collect():
         "agent_version": VERSION,
         "wallpaper": _wp_state().get("sha", ""),
         "wallpaper_err": _wp["err"],
+        **({"update_result": _upd["result"]} if _upd["result"] else {}),
     }
 
 
@@ -314,7 +318,10 @@ def _wp_clean(keep=None):
     for n in os.listdir(WP_DIR) if os.path.isdir(WP_DIR) else []:
         p = os.path.join(WP_DIR, n)
         if n != "state.json" and p != keep:
-            _safe(os.remove, p)
+            try:
+                os.remove(p)
+            except OSError:
+                pass
 
 
 def _wp_download(sha, path, size):
@@ -396,6 +403,289 @@ def wallpaper_sync(want):
             return
         log.info("wallpaper diganti di laptop, dipasang kembali (dikunci server)")
     _wp_run(_wp_apply, sha, path, style, int(want.get("bytes") or 0))
+
+
+# ---------- update agent dari server (menu Agent) ----------
+# Rilis = agent/release.json (daftar file + sha256) yang ditandatangani Ed25519 dengan kunci rahasia admin (bukan di
+# server). Agent hanya memasang rilis bertanda tangan sah dan versinya lebih baru. Versi lama dicadangkan; skrip
+# penjaga menjalankan ulang tugas terjadwal dan mengembalikan versi lama bila versi baru tidak tersambung ke server.
+TASK_NAME = CFG.get("task_name", "GateMonAgent")
+UPD_DIR = os.path.join(BASE, "update")
+UPD_PENDING, UPD_OK, UPD_FAILED = (os.path.join(UPD_DIR, n) for n in ("pending.json", "ok.flag", "failed.json"))
+UPD_WAIT = 150        # detik: versi baru harus berhasil heartbeat dalam waktu ini
+_upd = {"busy": False, "restart": False, "result": "", "pending": None, "failed": False}
+
+_EP = 2 ** 255 - 19
+_EL = 2 ** 252 + 27742317777372353535851937790883648493
+_ED = -121665 * pow(121666, _EP - 2, _EP) % _EP
+_EI = pow(2, (_EP - 1) // 4, _EP)
+
+
+def _ed_add(A, B):
+    x1, y1, z1, t1 = A
+    x2, y2, z2, t2 = B
+    a, b = (y1 - x1) * (y2 - x2) % _EP, (y1 + x1) * (y2 + x2) % _EP
+    c, d = t1 * 2 * _ED * t2 % _EP, z1 * 2 * z2 % _EP
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % _EP, g * h % _EP, f * g % _EP, e * h % _EP)
+
+
+def _ed_mul(s, A):
+    Q = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            Q = _ed_add(Q, A)
+        A, s = _ed_add(A, A), s >> 1
+    return Q
+
+
+def _ed_point(b):
+    if len(b) != 32:
+        return None
+    y = int.from_bytes(b, "little")
+    sign, y = y >> 255, y & ((1 << 255) - 1)
+    if y >= _EP:
+        return None
+    x2 = (y * y - 1) * pow(_ED * y * y + 1, _EP - 2, _EP) % _EP
+    if x2 == 0:
+        if sign:
+            return None
+        x = 0
+    else:
+        x = pow(x2, (_EP + 3) // 8, _EP)
+        if (x * x - x2) % _EP:
+            x = x * _EI % _EP
+        if (x * x - x2) % _EP:
+            return None
+        if (x & 1) != sign:
+            x = _EP - x
+    return (x, y, 1, x * y % _EP)
+
+
+_EG = _ed_point((4 * pow(5, _EP - 2, _EP) % _EP).to_bytes(32, "little"))
+
+
+def ed25519_verify(pub, msg, sig):
+    """Verifikasi tanda tangan Ed25519 (RFC 8032) tanpa library tambahan."""
+    if len(pub) != 32 or len(sig) != 64:
+        return False
+    A, R = _ed_point(pub), _ed_point(sig[:32])
+    s = int.from_bytes(sig[32:], "little")
+    if A is None or R is None or s >= _EL:
+        return False
+    h = int.from_bytes(hashlib.sha512(sig[:32] + pub + msg).digest(), "little") % _EL
+    P, Q = _ed_mul(s, _EG), _ed_add(R, _ed_mul(h, A))
+    return (P[0] * Q[2] - Q[0] * P[2]) % _EP == 0 and (P[1] * Q[2] - Q[1] * P[2]) % _EP == 0
+
+
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+
+
+def _upd_get(params, limit):
+    r = requests.get(f"{SERVER}/api/update.php", params=params, headers=HEADERS, timeout=(10, 120), stream=True)
+    if r.status_code != 200:
+        raise RuntimeError(f"unduh {list(params.values())[0]} gagal (HTTP {r.status_code})")
+    buf = io.BytesIO()
+    for chunk in r.iter_content(65536):
+        buf.write(chunk)
+        if buf.tell() > limit:
+            raise RuntimeError("file update terlalu besar")
+    return buf.getvalue()
+
+
+def _wheel_ok(fn):
+    """Wheel cocok untuk Python laptop ini? (py3-none-any, cpXY sama, atau abi3 cpXY <= versi Python)"""
+    parts = fn[:-4].split("-")
+    if len(parts) < 5:
+        return False
+    py, abi, plat = parts[-3], parts[-2], parts[-1]
+    if not set(plat.split(".")) & {"any", "win_amd64" if sys.maxsize > 2 ** 32 else "win32"}:
+        return False
+    for t in py.split("."):
+        if t.startswith("py3"):
+            return True
+        if t.startswith("cp") and t[2:].isdigit() and len(t) >= 4:
+            v = (int(t[2]), int(t[3:]))
+            if v == sys.version_info[:2] or (abi == "abi3" and v <= sys.version_info[:2]):
+                return True
+    return False
+
+
+def _sha_file(p):
+    try:
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def self_update():
+    """Unduh, periksa tanda tangan & sha256, pasang library baru bila perlu, ganti file (versi lama dicadangkan)."""
+    if not IS_WIN:
+        raise RuntimeError("update otomatis hanya untuk Windows")
+    if not UPDATE_PUBKEY:
+        raise RuntimeError("agent ini tidak punya kunci publik update (pasang ulang lewat /install/ID)")
+    raw = _upd_get({"f": "manifest"}, 1 << 20)
+    sig = bytes.fromhex(_upd_get({"f": "sig"}, 1024).decode("ascii").strip())
+    if not ed25519_verify(bytes.fromhex(UPDATE_PUBKEY), raw, sig):
+        raise RuntimeError("tanda tangan rilis TIDAK SAH, update ditolak")
+    m = json.loads(raw)
+    if m.get("app") != "gatemon-agent":
+        raise RuntimeError("rilis bukan untuk GateMon Agent")
+    if _vtuple(m.get("version")) <= _vtuple(VERSION):
+        return f"sudah versi terbaru ({VERSION}, rilis {m.get('version')})", False
+    files = m.get("files") or []
+    if not any(f.get("path") == "agent.py" for f in files):
+        raise RuntimeError("rilis tidak berisi agent.py")
+    stage = os.path.join(UPD_DIR, "baru")
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    for f in files:
+        name = str(f.get("path", ""))
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+\.(py|txt)", name):
+            raise RuntimeError("nama file rilis tidak diizinkan: " + name)
+        data = _upd_get({"f": name}, 5 << 20)
+        if hashlib.sha256(data).hexdigest() != f.get("sha256"):
+            raise RuntimeError(f"{name} tidak cocok dengan rilis (sha256)")
+        with open(os.path.join(stage, name), "wb") as fh:
+            fh.write(data)
+        if name.endswith(".py"):
+            compile(data, name, "exec")                  # file rusak/syntax error ketahuan sebelum dipasang
+    # library: hanya bila requirements.txt berubah (pip memakai wheel bertanda tangan dari server, tanpa internet)
+    req = os.path.join(stage, "requirements.txt")
+    if os.path.isfile(req) and _sha_file(req) != _sha_file(os.path.join(BASE, "requirements.txt")):
+        wdir = os.path.join(stage, "wheels")
+        os.makedirs(wdir)
+        for w in m.get("wheels") or []:
+            fn = str(w.get("file", ""))
+            if not re.fullmatch(r"[A-Za-z0-9_.\-]+\.whl", fn) or not _wheel_ok(fn):
+                continue
+            data = _upd_get({"w": fn}, 64 << 20)
+            if hashlib.sha256(data).hexdigest() != w.get("sha256"):
+                raise RuntimeError(f"{fn} tidak cocok dengan rilis (sha256)")
+            with open(os.path.join(wdir, fn), "wb") as fh:
+                fh.write(data)
+        py = os.path.join(os.path.dirname(sys.executable), "python.exe")
+        r = subprocess.run([py, "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location",
+                            "--no-index", "--find-links", wdir, "--only-binary=:all:", "-r", req],
+                           capture_output=True, text=True, timeout=900, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode:
+            raise RuntimeError("pip gagal: " + (r.stderr or r.stdout).strip()[-300:])
+        log.info("library diperbarui dari %d wheel", len(os.listdir(wdir)))
+    # cadangkan versi sekarang lalu ganti
+    old = os.path.join(UPD_DIR, "lama")
+    shutil.rmtree(old, ignore_errors=True)
+    os.makedirs(old)
+    names = [str(f["path"]) for f in files]
+    for n in names:
+        if os.path.isfile(os.path.join(BASE, n)):
+            shutil.copy2(os.path.join(BASE, n), os.path.join(old, n))
+    with open(UPD_PENDING, "w", encoding="utf-8") as fh:
+        json.dump({"from": VERSION, "to": m["version"], "files": names, "t": int(time.time())}, fh)
+    for n in names:
+        os.replace(os.path.join(stage, n), os.path.join(BASE, n))
+    shutil.rmtree(stage, ignore_errors=True)
+    log.info("update %s -> %s dipasang, restart", VERSION, m["version"])
+    return f"update {VERSION} -> {m['version']} dipasang, agent restart", True
+
+
+# Skrip penjaga (berjalan setelah agent lama keluar): jalankan tugas terjadwal, tunggu versi baru berhasil heartbeat
+# (ok.flag); bila tidak dalam UPD_WAIT detik, kembalikan file versi lama dan jalankan lagi.
+_GUARD_PS1 = r"""param([int]$OldPid, [string]$Base, [string]$Task, [int]$Wait)
+$ErrorActionPreference = 'SilentlyContinue'
+$u = Join-Path $Base 'update'
+Wait-Process -Id $OldPid -Timeout 30
+schtasks.exe /Run /TN $Task | Out-Null
+$end = (Get-Date).AddSeconds($Wait)
+while ((Get-Date) -lt $end) {
+    if (Test-Path (Join-Path $u 'ok.flag')) { Remove-Item (Join-Path $u 'ok.flag') -Force; exit 0 }
+    Start-Sleep -Seconds 3
+}
+$p = Get-Content (Join-Path $u 'pending.json') -Raw | ConvertFrom-Json
+if (-not $p) { exit 0 }
+schtasks.exe /End /TN $Task | Out-Null
+Start-Sleep -Seconds 3
+foreach ($f in $p.files) {
+    $b = Join-Path (Join-Path $u 'lama') $f; $t = Join-Path $Base $f
+    if (Test-Path $b) { Copy-Item $b $t -Force } else { Remove-Item $t -Force }
+}
+$r = @{ from = $p.from; to = $p.to; reason = "versi $($p.to) tidak tersambung ke server dalam $Wait detik" }
+[IO.File]::WriteAllText((Join-Path $u 'failed.json'), ($r | ConvertTo-Json -Compress))
+Remove-Item (Join-Path $u 'pending.json') -Force
+schtasks.exe /Run /TN $Task | Out-Null
+"""
+
+
+def restart_for_update():
+    guard = os.path.join(UPD_DIR, "penjaga.ps1")
+    with open(guard, "w", encoding="ascii") as fh:
+        fh.write(_GUARD_PS1)
+    args = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+            "-File", guard, "-OldPid", str(os.getpid()), "-Base", BASE, "-Task", TASK_NAME, "-Wait", str(UPD_WAIT)]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:    # lepas dari job Task Scheduler agar penjaga tetap hidup saat tugas agent berhenti
+        subprocess.Popen(args, creationflags=flags | 0x01000000, close_fds=True)   # CREATE_BREAKAWAY_FROM_JOB
+    except OSError:
+        subprocess.Popen(args, creationflags=flags, close_fds=True)
+    logging.shutdown()
+    os._exit(0)
+
+
+def start_update(cmd_id):
+    """Perintah UPDATE_AGENT: dikerjakan di thread agar heartbeat tetap jalan (pip bisa butuh waktu)."""
+    def _go():
+        try:
+            msg, restart = self_update()
+            st = "done"
+        except Exception as e:
+            log.exception("update gagal")
+            msg, restart, st = "update gagal: " + str(e)[:300], False, "failed"
+        try:
+            requests.post(f"{SERVER}/api/result.php", headers=HEADERS, timeout=15,
+                          json={"command_id": cmd_id, "status": st, "result": msg})
+        except Exception as e:
+            log.error("gagal lapor hasil update #%s: %s", cmd_id, e)
+        _upd["busy"], _upd["restart"] = False, restart
+    if _upd["busy"]:
+        return
+    _upd["busy"] = True
+    threading.Thread(target=_go, daemon=True).start()
+
+
+def update_startup():
+    """Saat agent start: hasil update sebelumnya (berhasil / dikembalikan penjaga) dilaporkan lewat heartbeat."""
+    try:
+        os.remove(UPD_OK)
+    except OSError:
+        pass
+    for path, ok in ((UPD_PENDING, True), (UPD_FAILED, False)):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                p = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if ok and str(p.get("to")) == VERSION:
+            _upd["pending"], _upd["result"] = p, f"ok:{p.get('from')}>{VERSION}"
+        elif not ok:
+            _upd["failed"], _upd["result"] = True, f"fail:{p.get('to')}:{p.get('reason', '')}"[:250]
+
+
+def update_confirmed():
+    """Dipanggil setelah heartbeat sukses: versi baru dinyatakan sehat (penjaga berhenti), laporan dihapus."""
+    if _upd["pending"]:
+        open(UPD_OK, "w").close()
+        try:
+            os.remove(UPD_PENDING)
+        except OSError:
+            pass
+        log.info("update ke %s dikonfirmasi server", VERSION)
+    if _upd["failed"]:
+        try:
+            os.remove(UPD_FAILED)
+        except OSError:
+            pass
+    _upd["pending"], _upd["failed"], _upd["result"] = None, False, ""
 
 
 # ---------- eksekusi perintah ----------
@@ -762,6 +1052,7 @@ def main():
     interval = int(CFG.get("interval", 5))
     log.info("agent %s start, server %s, device %s", VERSION, SERVER, CFG["device_key"])
     psutil.cpu_percent(interval=None)
+    update_startup()
     threading.Thread(target=scan_watcher, daemon=True).start()
     while True:
         try:
@@ -777,6 +1068,8 @@ def main():
                 log.error("ditolak server (401): periksa device_key/token di config.json")
             else:
                 j = r.json()
+                if r.status_code == 200 and "update_result" in body:
+                    update_confirmed()                           # versi baru sehat / laporan rollback terkirim
                 interval = max(2, min(300, int(j.get("interval", interval))))  # diatur di menu Pengaturan
                 gate_check_every = max(10, min(600, int(j.get("gate_check_every", gate_check_every))))
                 scan_capture = bool(j.get("scan_capture", 0))
@@ -799,6 +1092,9 @@ def main():
                     gate_url = j["gate_url"]
                 for cmd in j.get("commands", []):
                     log.info("perintah #%s %s", cmd["id"], cmd["type"])
+                    if cmd["type"] == "UPDATE_AGENT":            # hasil dilaporkan thread update sendiri
+                        start_update(cmd["id"])
+                        continue
                     try:
                         report(cmd["id"], "done", run_command(cmd))
                     except Exception as e:
@@ -807,6 +1103,8 @@ def main():
                 auto_gate(j)
                 if "wallpaper" in j:                             # server lama tidak mengirim: wallpaper tidak disentuh
                     wallpaper_sync(j["wallpaper"])
+            if _upd["restart"]:
+                restart_for_update()                             # hasil update sudah dilaporkan; penjaga mengambil alih
         except Exception as e:
             net_ms = None
             log.warning("heartbeat gagal: %s", e)

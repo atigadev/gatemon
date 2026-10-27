@@ -238,6 +238,35 @@ function agent_version() {
     return $v;
 }
 
+// ---------- update agent dari server (agent >= 1.9, menu Agent) ----------
+const AGENT_UPDATE_MIN = '1.9.0';   // agent mulai versi ini bisa diupdate otomatis; yang lebih lama dipasang ulang manual
+// Rilis bertanda tangan di agent/release.json + release.sig (dibuat admin-tools/rilis-agent.bat).
+// ready = boleh dikirim ke laptop: tanda tangan ada & file di server sama dengan yang ditandatangani.
+function agent_release() {
+    $dir = __DIR__ . '/agent';
+    $r = ['version' => null, 'created' => null, 'ready' => false, 'sig_ok' => null, 'problems' => []];
+    $raw = @file_get_contents("$dir/release.json");
+    $sig = trim((string)@file_get_contents("$dir/release.sig"));
+    $m = $raw ? json_decode($raw, true) : null;
+    if (!$m || !preg_match('/^[0-9a-f]{128}$/', $sig)) { $r['problems'][] = 'Belum ada rilis bertanda tangan.'; return $r; }
+    $r['version'] = $m['version'] ?? null;
+    $r['created'] = $m['created'] ?? null;
+    $pk = preg_match('/^UPDATE_PUBKEY = "([0-9a-f]{64})"/m', (string)@file_get_contents("$dir/agent.py"), $mm) ? $mm[1] : '';
+    if ($pk === '') $r['problems'][] = 'Kunci publik update belum diisi di agent.py.';
+    foreach ($m['files'] ?? [] as $f) {
+        if (@hash_file('sha256', "$dir/{$f['path']}") !== $f['sha256']) $r['problems'][] = "{$f['path']} di server berbeda dengan yang ditandatangani (tanda tangani ulang).";
+    }
+    foreach ($m['wheels'] ?? [] as $w) {
+        if (@filesize("$dir/installer/wheels/{$w['file']}") !== $w['size']) $r['problems'][] = "Wheel {$w['file']} hilang / berubah.";
+    }
+    if ($pk !== '' && function_exists('sodium_crypto_sign_verify_detached')) {   // tanpa ekstensi sodium: diperiksa agent saja
+        $r['sig_ok'] = sodium_crypto_sign_verify_detached(hex2bin($sig), $raw, hex2bin($pk));
+        if (!$r['sig_ok']) $r['problems'][] = 'Tanda tangan tidak cocok dengan kunci publik di agent.py.';
+    }
+    $r['ready'] = !$r['problems'];
+    return $r;
+}
+
 // ---------- wallpaper laptop (agent >= 1.9, menu Wallpaper) ----------
 // File di folder wallpaper/ (ditutup dari web), nama = sha256 isi file. Agent mengunduh lewat api/wallpaper.php.
 const WALLPAPER_DIR = __DIR__ . '/wallpaper';
