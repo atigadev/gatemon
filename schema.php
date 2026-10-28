@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 3;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10)
+const SCHEMA_VERSION = 4;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan
 
 function schema_version(PDO $pdo) {
     try {
@@ -176,6 +176,20 @@ function schema_apply(PDO $pdo) {
   created_by VARCHAR(50) NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL");
     if (!is_dir(__DIR__ . '/wallpaper')) @mkdir(__DIR__ . '/wallpaper', 0775);
+    // Group kategori hasil scan untuk Laporan (kategori dari halaman gate -> group, mis. VIP -> ID-CARD).
+    // Diisi pemetaan awal saat tabel dibuat; selanjutnya diatur dari menu Laporan.
+    $new_groups = !in_array('scan_groups', $tables, true);
+    $table('scan_groups', "
+  category VARCHAR(100) PRIMARY KEY,
+  grp VARCHAR(50) NOT NULL,
+  updated_at DATETIME NOT NULL");
+    if ($new_groups) {
+        $st = $pdo->prepare("INSERT INTO scan_groups (category, grp, updated_at) VALUES (?, ?, NOW())");
+        foreach (['EXHIBITOR' => 'ID-CARD', 'ASIC' => 'ASIC', 'EXH PASS' => 'EXH', 'EXH PASS PLUS' => 'EXH', 'MEDIA' => 'ID-CARD',
+            'PARTNERS' => 'ID-CARD', 'ORGANIZER' => 'ID-CARD', 'CREW' => 'ID-CARD', 'ASIC PLUS' => 'ASIC', 'FOOD AND BEVERAGE' => 'ID-CARD',
+            'SPECIAL GUEST' => 'ID-CARD', 'TEMPORARY' => 'ID-CARD', 'COMMITTEE' => 'ID-CARD', 'VIP' => 'ID-CARD'] as $c => $g) $st->execute([$c, $g]);
+        $done[] = 'group kategori scan awal dibuat';
+    }
 
     // Kategori bawaan hanya untuk database baru (kategori yang sengaja dihapus tidak muncul lagi)
     if ($fresh) {

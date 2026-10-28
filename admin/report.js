@@ -27,5 +27,14 @@
     if(e.target === modal || e.target.closest('[data-hist-close]')) close();
   });
   document.addEventListener('keydown', e => { if(e.key === 'Escape' && !modal.hidden) close(); });
+
+  // modal "Atur group kategori" (supervisor)
+  document.addEventListener('click', e => {
+    const op = e.target.closest('[data-open-modal]');
+    if(op){ const m = document.getElementById(op.dataset.openModal); if(m){ m.hidden = false; m.querySelector('input[name="grp[]"]')?.focus(); } return; }
+    const gm = e.target.closest('.modal');
+    if(gm && gm.id !== 'hist-modal' && (e.target === gm || e.target.closest('[data-close-modal]'))) gm.hidden = true;
+  });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') document.querySelectorAll('.modal:not(#hist-modal)').forEach(m => m.hidden = true); });
   if(!modal.hidden) body.querySelector('[data-hist-close]')?.focus();
 })();
