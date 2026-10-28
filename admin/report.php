@@ -28,6 +28,57 @@ if ($cat !== '') { $w .= " AND category = ?"; $p[] = $cat; }
 if ($gate !== '') { $w .= " AND gate = ?"; $p[] = $gate; }
 function q($sql, $params) { global $pdo; $st = $pdo->prepare($sql); $st->execute($params); return $st; }
 
+// ---------- riwayat scan satu QR (isi modal): semua tanggal, tidak terbatas filter ----------
+function history_html($code) {
+    global $pdo;
+    $names = array_column($pdo->query("SELECT id, name FROM devices")->fetchAll(), 'name', 'id');
+    $hist = q("SELECT scanned_at, status, category, gate, device_id FROM scans WHERE code = ? ORDER BY scanned_at, id", [$code])->fetchAll();
+    $place = function ($r) use ($names) { return ($r['gate'] ?: '–') . ' · ' . ($names[$r['device_id']] ?? 'laptop terhapus'); };
+    ob_start(); ?>
+    <div class="modal-head"><h3><?= icon('pulse') ?> Riwayat scan <code><?= h($code) ?></code></h3><button type="button" class="icon-btn sm" data-hist-close aria-label="Tutup">✕</button></div>
+    <div class="hist-body">
+    <?php if (!$hist): ?>
+      <p class="muted">Tidak ada scan dengan ID QR ini (di semua tanggal yang masih tersimpan).</p>
+    <?php else:
+        $ok_rows = array_values(array_filter($hist, function ($r) { return $r['status'] === 'success'; }));
+        $first = $ok_rows[0] ?? null; ?>
+      <div class="load rep-hist-sum">
+        <div><span>Status</span><b class="<?= $first ? 'wol-ready' : 'wol-warn' ?>"><?= $first ? 'Berhasil (dihitung 1)' : 'Tidak pernah berhasil' ?></b></div>
+        <div><span>Pertama berhasil</span><b><?= $first ? h($first['scanned_at'] . ' · ' . $place($first)) : '–' ?></b></div>
+        <div><span>Jumlah scan</span><b><?= count($hist) ?> (<?= count($ok_rows) ?> berhasil, <?= count($hist) - count($ok_rows) ?> gagal)</b></div>
+        <div><span>Di-scan di</span><b><?= h(implode(', ', array_unique(array_map($place, $hist)))) ?></b></div>
+      </div>
+      <div class="table-wrap"><table class="table small">
+        <tr><th>No</th><th>Waktu</th><th>Status</th><th>Kategori</th><th>Gate</th><th>Laptop</th><th>Keterangan</th></tr>
+        <?php $seen = false; foreach ($hist as $i => $r):
+            $ok = $r['status'] === 'success';
+            $note = $ok ? (!$seen ? '<span class="badge ok-badge">Dihitung</span>' : '<span class="badge warn-badge">Ganda</span>') : '<span class="muted">tidak dihitung</span>';
+            if ($ok) $seen = true; ?>
+        <tr>
+          <td class="muted"><?= $i + 1 ?></td>
+          <td class="mono"><?= h($r['scanned_at']) ?></td>
+          <td><span class="state <?= $ok ? 'ok' : 'offline' ?>"><i></i><?= h(STATUS_LABEL[$r['status']] ?? $r['status']) ?></span></td>
+          <td><?= h($r['category'] ?: '–') ?></td>
+          <td><?= h($r['gate'] ?: '–') ?></td>
+          <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
+          <td><?= $note ?></td>
+        </tr>
+        <?php endforeach; ?>
+      </table></div>
+      <p class="muted small">Riwayat dari semua tanggal yang masih tersimpan, tidak terbatas filter tanggal laporan.</p>
+    <?php endif; ?>
+    </div>
+    <?php return ob_get_clean();
+}
+// dipanggil modal (fetch): hanya isi modal
+if (isset($_GET['history'])) {
+    header('Content-Type: text/html; charset=utf-8');
+    header('X-GateMon-History: 1');   // penanda bagi JS: bukan halaman login (sesi habis)
+    header('Cache-Control: no-store');
+    echo history_html(mb_substr(trim((string)$_GET['history']), 0, 100));
+    exit;
+}
+
 // ---------- QR unik berhasil: satu baris per QR, atribut dari scan berhasil pertama ----------
 $S = "\x1f";   // pemisah GROUP_CONCAT (tidak mungkin ada di data)
 $uniq = q("SELECT code, COUNT(*) AS n, MIN(scanned_at) AS first_at, MAX(scanned_at) AS last_at,
@@ -88,7 +139,7 @@ if ($code === '' && $search !== '') {
     $code = (string)q("SELECT code FROM scans WHERE code = ? LIMIT 1", [$search])->fetchColumn();
     if ($code === '' && count($uniq_show) + count($fail_show) === 1) $code = ($uniq_show ?: $fail_show)[0]['code'];
 }
-$hist = $code !== '' ? q("SELECT scanned_at, status, category, gate, device_id FROM scans WHERE code = ? ORDER BY scanned_at, id", [$code])->fetchAll() : [];
+// $code terisi: modal riwayat langsung terbuka saat halaman dimuat (link ?code=, atau hasil pencarian tunggal)
 
 // pilihan filter (dari data periode ini)
 $opt_dev = $pdo->query("SELECT DISTINCT d.id, d.name FROM devices d JOIN scans s ON s.device_id = d.id ORDER BY d.name")->fetchAll();
@@ -106,7 +157,7 @@ function bars($rows, $total) {
     return $o . '</table>';
 }
 $qs = http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'category' => $cat, 'gate' => $gate, 'q' => $search], function ($v) { return $v !== null && $v !== ''; }));
-function code_link($c) { global $qs; return '<a class="rep-code" href="report.php?' . h($qs . '&code=' . rawurlencode($c)) . '#riwayat" title="Lihat riwayat scan"><code>' . h($c) . '</code></a>'; }
+function code_link($c) { global $qs; return '<a class="rep-code" data-code="' . h($c) . '" href="report.php?' . h($qs . '&code=' . rawurlencode($c)) . '" title="Lihat riwayat scan"><code>' . h($c) . '</code></a>'; }
 function tgl($d) {
     $bln = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
     $t = strtotime($d);
@@ -137,46 +188,10 @@ topbar('report', 'Monitoring Laptop');
     </form>
   </section>
 
-  <?php if ($code !== '' || $search !== ''): ?>
-  <section class="card" id="riwayat">
-    <?php if (!$hist): ?>
-    <h2><?= icon('x') ?> QR "<?= h($search ?: $code) ?>"</h2>
-    <p class="muted"><?= ($uniq_show || $fail_show) ? 'Ditemukan ' . (count($uniq_show) + count($fail_show)) . ' QR yang mengandung teks ini. Klik ID QR di daftar bawah untuk melihat riwayatnya.' : 'Tidak ada scan dengan ID QR ini (di semua tanggal yang masih tersimpan).' ?></p>
-    <?php else:
-        $ok_rows = array_filter($hist, function ($r) { return $r['status'] === 'success'; });
-        $first = $ok_rows ? reset($ok_rows) : null;
-        $places = array_unique(array_map(function ($r) use ($names) { return ($r['gate'] ?: '–') . ' · ' . ($names[$r['device_id']] ?? 'laptop terhapus'); }, $hist));
-    ?>
-    <div class="table-tools">
-      <h2><?= icon('pulse') ?> Riwayat scan <code><?= h($code) ?></code></h2>
-      <a class="btn" href="report.php?<?= h(http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'category' => $cat, 'gate' => $gate]))) ?>"><?= icon('x') ?> Tutup</a>
-    </div>
-    <div class="load rep-hist-sum">
-      <div><span>Status</span><b class="<?= $first ? 'wol-ready' : 'wol-warn' ?>"><?= $first ? 'Berhasil (dihitung 1)' : 'Tidak pernah berhasil' ?></b></div>
-      <div><span>Pertama berhasil</span><b><?= $first ? h($first['scanned_at']) . ' · ' . h(($first['gate'] ?: '–') . ' · ' . ($names[$first['device_id']] ?? 'laptop terhapus')) : '–' ?></b></div>
-      <div><span>Jumlah scan</span><b><?= count($hist) ?> (<?= count($ok_rows) ?> berhasil, <?= count($hist) - count($ok_rows) ?> gagal)</b></div>
-      <div><span>Di-scan di</span><b><?= h(implode(', ', $places)) ?></b></div>
-    </div>
-    <div class="table-wrap"><table class="table small">
-      <tr><th>No</th><th>Waktu</th><th>Status</th><th>Kategori</th><th>Gate</th><th>Laptop</th><th>Keterangan</th></tr>
-      <?php $seen = false; foreach ($hist as $i => $r):
-          $ok = $r['status'] === 'success';
-          $note = $ok ? (!$seen ? '<span class="badge ok-badge">Dihitung</span>' : '<span class="badge warn-badge">Ganda</span>') : '<span class="muted">tidak dihitung</span>';
-          if ($ok) $seen = true; ?>
-      <tr>
-        <td class="muted"><?= $i + 1 ?></td>
-        <td class="mono"><?= h($r['scanned_at']) ?></td>
-        <td><span class="state <?= $ok ? 'ok' : 'offline' ?>"><i></i><?= h(STATUS_LABEL[$r['status']] ?? $r['status']) ?></span></td>
-        <td><?= h($r['category'] ?: '–') ?></td>
-        <td><?= h($r['gate'] ?: '–') ?></td>
-        <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
-        <td><?= $note ?></td>
-      </tr>
-      <?php endforeach; ?>
-    </table></div>
-    <p class="muted small">Riwayat dari semua tanggal yang masih tersimpan, tidak terbatas filter tanggal di atas.</p>
-    <?php endif; ?>
-  </section>
+  <?php if ($search !== '' && $code === ''): ?>
+  <p class="notice <?= ($uniq_show || $fail_show) ? '' : 'warn-notice' ?>"><?= ($uniq_show || $fail_show)
+      ? 'Ditemukan ' . (count($uniq_show) + count($fail_show)) . ' QR yang mengandung "' . h($search) . '". Klik ID QR di daftar untuk melihat riwayatnya.'
+      : 'Tidak ada scan dengan ID QR "' . h($search) . '" di periode ini maupun tanggal lain yang masih tersimpan.' ?></p>
   <?php endif; ?>
 
   <section class="summary">
@@ -247,4 +262,8 @@ topbar('report', 'Monitoring Laptop');
   </section>
   <?php endif; ?>
 </main>
-<?php page_foot();
+
+<div class="modal" id="hist-modal" <?= $code === '' ? 'hidden' : '' ?> role="dialog" aria-modal="true" aria-label="Riwayat scan">
+  <div class="modal-box form-modal hist-box" id="hist-body"><?= $code !== '' ? history_html($code) : '' ?></div>
+</div>
+<?php page_foot(['report.js?v=1']);

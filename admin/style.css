@@ -523,3 +523,4 @@ input[type=range]:focus{box-shadow:none}
 .rep-code{text-decoration:none}.rep-code code{cursor:pointer;transition:background .15s}.rep-code:hover code{background:color-mix(in srgb,var(--primary) 22%,transparent);color:var(--primary)}
 .rep-sel td{background:color-mix(in srgb,var(--primary) 10%,transparent)}
 .rep-hist-sum b{text-align:right;overflow-wrap:anywhere}
+.hist-box{width:860px}.hist-box .modal-head h3{margin:0;display:flex;align-items:center;gap:8px}.hist-body{padding:16px 22px 20px;margin:0}
