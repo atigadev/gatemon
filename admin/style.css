@@ -514,3 +514,8 @@ input[type=range]:focus{box-shadow:none}
 .wp-upload,.wp-upload .fld{width:100%}.wp-upload .fld{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--text-2)}
 .wp-upload input[type=file]{width:100%;font-size:13px}
 .state.none{--st:var(--muted)}.state.pending{--st:var(--primary)}.state.pending i{animation:ping 1.6s infinite}
+/* Laporan scan */
+.rep-filters{align-items:flex-end}.rep-filters label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.rep-filters input[type=date]{width:auto}.rep-filters select{min-width:150px}
+.rep-bars td:first-child{white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.rep-bar{width:55%}.rep-bar i{display:block;height:10px;border-radius:999px;background:linear-gradient(90deg,var(--primary),var(--primary-2));min-width:3px}

@@ -27,6 +27,7 @@ function icon($name, $cls = 'ic') {
         'x'         => '<path d="M18 6L6 18M6 6l12 12"/>',
         'copy'      => '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
         'image'     => '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+        'chart'     => '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="1"/><rect x="12" y="8" width="3" height="10" rx="1"/><rect x="17" y="5" width="3" height="13" rx="1"/>',
         'power'     => '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>',
         'shield'    => '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
         'camera'    => '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
@@ -45,7 +46,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=21">'
+       . '<link rel="stylesheet" href="style.css?v=22">'
        . '<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
@@ -56,6 +57,7 @@ function nav_items() {
     return [
         'index'      => ['Dashboard', 'dashboard'],
         'monitor'    => ['Monitor', 'monitor'],
+        'report'     => ['Laporan', 'chart'],
         'devices'    => ['Devices', 'devices'],
         'categories' => ['Kategori', 'tag'],
         'wallpaper'  => ['Wallpaper', 'image'],
