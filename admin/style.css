@@ -519,3 +519,7 @@ input[type=range]:focus{box-shadow:none}
 .rep-filters input[type=date]{width:auto}.rep-filters select{min-width:150px}
 .rep-bars td:first-child{white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis}
 .rep-bar{width:55%}.rep-bar i{display:block;height:10px;border-radius:999px;background:linear-gradient(90deg,var(--primary),var(--primary-2));min-width:3px}
+.rep-search input{width:200px;font-family:var(--mono)}
+.rep-code{text-decoration:none}.rep-code code{cursor:pointer;transition:background .15s}.rep-code:hover code{background:color-mix(in srgb,var(--primary) 22%,transparent);color:var(--primary)}
+.rep-sel td{background:color-mix(in srgb,var(--primary) 10%,transparent)}
+.rep-hist-sum b{text-align:right;overflow-wrap:anywhere}

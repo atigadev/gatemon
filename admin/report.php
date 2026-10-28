@@ -17,6 +17,8 @@ if ((strtotime($to) - strtotime($from)) / 86400 > 92) $to = date('Y-m-d', strtot
 $dev = (int)($_GET['device'] ?? 0);
 $cat = trim((string)($_GET['category'] ?? ''));
 $gate = trim((string)($_GET['gate'] ?? ''));
+$search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);      // cari ID QR (sebagian), menyaring daftar
+$code = mb_substr(trim((string)($_GET['code'] ?? '')), 0, 100);     // riwayat satu QR (semua tanggal)
 
 $w = "scanned_at >= ? AND scanned_at < ?";
 $p = [$from . ' 00:00:00', date('Y-m-d', strtotime($to) + 86400) . ' 00:00:00'];
@@ -77,6 +79,17 @@ foreach ($uniq as $r) {
 }
 arsort($per_cat); arsort($per_gate); ksort($per_hour); ksort($per_day);
 
+// ---------- cari ID QR & riwayat scan ----------
+$match = function ($r) use ($search) { return $search === '' || stripos($r['code'], $search) !== false; };
+$uniq_show = array_values(array_filter($uniq, $match));
+$fail_show = array_values(array_filter($fail_only, $match));
+if ($code === '' && $search !== '') {
+    // ID persis ada di database (tanggal berapa pun), atau pencarian hanya menemukan satu QR -> langsung tampilkan riwayatnya
+    $code = (string)q("SELECT code FROM scans WHERE code = ? LIMIT 1", [$search])->fetchColumn();
+    if ($code === '' && count($uniq_show) + count($fail_show) === 1) $code = ($uniq_show ?: $fail_show)[0]['code'];
+}
+$hist = $code !== '' ? q("SELECT scanned_at, status, category, gate, device_id FROM scans WHERE code = ? ORDER BY scanned_at, id", [$code])->fetchAll() : [];
+
 // pilihan filter (dari data periode ini)
 $opt_dev = $pdo->query("SELECT DISTINCT d.id, d.name FROM devices d JOIN scans s ON s.device_id = d.id ORDER BY d.name")->fetchAll();
 $opt_cat = q("SELECT DISTINCT category FROM scans WHERE {$base[0]} AND category <> '' ORDER BY category", $base[1])->fetchAll(PDO::FETCH_COLUMN);
@@ -92,7 +105,8 @@ function bars($rows, $total) {
     }
     return $o . '</table>';
 }
-$qs = http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'category' => $cat, 'gate' => $gate], function ($v) { return $v !== null && $v !== ''; }));
+$qs = http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'category' => $cat, 'gate' => $gate, 'q' => $search], function ($v) { return $v !== null && $v !== ''; }));
+function code_link($c) { global $qs; return '<a class="rep-code" href="report.php?' . h($qs . '&code=' . rawurlencode($c)) . '#riwayat" title="Lihat riwayat scan"><code>' . h($c) . '</code></a>'; }
 function tgl($d) {
     $bln = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
     $t = strtotime($d);
@@ -112,6 +126,7 @@ topbar('report', 'Monitoring Laptop');
 
   <section class="card">
     <form method="get" class="filters rep-filters">
+      <label class="rep-search">Cari ID QR <input type="search" name="q" value="<?= h($search) ?>" placeholder="mis. D15Z0H3MC" spellcheck="false" autocomplete="off"></label>
       <label>Dari <input type="date" name="from" value="<?= h($from) ?>" max="<?= $today ?>"></label>
       <label>Sampai <input type="date" name="to" value="<?= h($to) ?>" max="<?= $today ?>"></label>
       <label>Laptop <select name="device"><option value="0">Semua laptop</option><?php foreach ($opt_dev as $o): ?><option value="<?= $o['id'] ?>" <?= $dev === (int)$o['id'] ? 'selected' : '' ?>><?= h($o['name']) ?></option><?php endforeach; ?></select></label>
@@ -121,6 +136,48 @@ topbar('report', 'Monitoring Laptop');
       <a class="btn" href="report.php">Hari ini</a>
     </form>
   </section>
+
+  <?php if ($code !== '' || $search !== ''): ?>
+  <section class="card" id="riwayat">
+    <?php if (!$hist): ?>
+    <h2><?= icon('x') ?> QR "<?= h($search ?: $code) ?>"</h2>
+    <p class="muted"><?= ($uniq_show || $fail_show) ? 'Ditemukan ' . (count($uniq_show) + count($fail_show)) . ' QR yang mengandung teks ini. Klik ID QR di daftar bawah untuk melihat riwayatnya.' : 'Tidak ada scan dengan ID QR ini (di semua tanggal yang masih tersimpan).' ?></p>
+    <?php else:
+        $ok_rows = array_filter($hist, function ($r) { return $r['status'] === 'success'; });
+        $first = $ok_rows ? reset($ok_rows) : null;
+        $places = array_unique(array_map(function ($r) use ($names) { return ($r['gate'] ?: '–') . ' · ' . ($names[$r['device_id']] ?? 'laptop terhapus'); }, $hist));
+    ?>
+    <div class="table-tools">
+      <h2><?= icon('pulse') ?> Riwayat scan <code><?= h($code) ?></code></h2>
+      <a class="btn" href="report.php?<?= h(http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'category' => $cat, 'gate' => $gate]))) ?>"><?= icon('x') ?> Tutup</a>
+    </div>
+    <div class="load rep-hist-sum">
+      <div><span>Status</span><b class="<?= $first ? 'wol-ready' : 'wol-warn' ?>"><?= $first ? 'Berhasil (dihitung 1)' : 'Tidak pernah berhasil' ?></b></div>
+      <div><span>Pertama berhasil</span><b><?= $first ? h($first['scanned_at']) . ' · ' . h(($first['gate'] ?: '–') . ' · ' . ($names[$first['device_id']] ?? 'laptop terhapus')) : '–' ?></b></div>
+      <div><span>Jumlah scan</span><b><?= count($hist) ?> (<?= count($ok_rows) ?> berhasil, <?= count($hist) - count($ok_rows) ?> gagal)</b></div>
+      <div><span>Di-scan di</span><b><?= h(implode(', ', $places)) ?></b></div>
+    </div>
+    <div class="table-wrap"><table class="table small">
+      <tr><th>No</th><th>Waktu</th><th>Status</th><th>Kategori</th><th>Gate</th><th>Laptop</th><th>Keterangan</th></tr>
+      <?php $seen = false; foreach ($hist as $i => $r):
+          $ok = $r['status'] === 'success';
+          $note = $ok ? (!$seen ? '<span class="badge ok-badge">Dihitung</span>' : '<span class="badge warn-badge">Ganda</span>') : '<span class="muted">tidak dihitung</span>';
+          if ($ok) $seen = true; ?>
+      <tr>
+        <td class="muted"><?= $i + 1 ?></td>
+        <td class="mono"><?= h($r['scanned_at']) ?></td>
+        <td><span class="state <?= $ok ? 'ok' : 'offline' ?>"><i></i><?= h(STATUS_LABEL[$r['status']] ?? $r['status']) ?></span></td>
+        <td><?= h($r['category'] ?: '–') ?></td>
+        <td><?= h($r['gate'] ?: '–') ?></td>
+        <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
+        <td><?= $note ?></td>
+      </tr>
+      <?php endforeach; ?>
+    </table></div>
+    <p class="muted small">Riwayat dari semua tanggal yang masih tersimpan, tidak terbatas filter tanggal di atas.</p>
+    <?php endif; ?>
+  </section>
+  <?php endif; ?>
 
   <section class="summary">
     <div class="stat ok"><span class="label">QR unik berhasil</span><span class="value"><?= $n_uniq ?></span><span class="sic"><?= icon('save') ?></span></div>
@@ -158,14 +215,14 @@ topbar('report', 'Monitoring Laptop');
   </div>
 
   <section class="card">
-    <h2><?= icon('save') ?> Daftar QR unik berhasil <span class="badge"><?= $n_uniq ?></span></h2>
-    <?php if (!$uniq): ?><p class="muted">Belum ada QR yang berhasil di periode / filter ini.</p><?php else: ?>
+    <h2><?= icon('save') ?> Daftar QR unik berhasil <span class="badge"><?= $search !== '' ? count($uniq_show) . ' dari ' . $n_uniq : $n_uniq ?></span></h2>
+    <?php if (!$uniq_show): ?><p class="muted"><?= $search !== '' ? 'Tidak ada QR berhasil yang mengandung "' . h($search) . '" di periode / filter ini.' : 'Belum ada QR yang berhasil di periode / filter ini.' ?></p><?php else: ?>
     <div class="table-wrap"><table class="table small">
       <tr><th>No</th><th>ID QR</th><th>Kategori</th><th>Gate</th><th>Laptop</th><th>Pertama berhasil</th><th class="right">Scan berhasil</th></tr>
-      <?php foreach (array_slice($uniq, 0, SHOW_MAX) as $i => $r): ?>
-      <tr>
+      <?php foreach (array_slice($uniq_show, 0, SHOW_MAX) as $i => $r): ?>
+      <tr<?= $r['code'] === $code ? ' class="rep-sel"' : '' ?>>
         <td class="muted"><?= $i + 1 ?></td>
-        <td><code><?= h($r['code']) ?></code></td>
+        <td><?= code_link($r['code']) ?></td>
         <td><?= h($r['category'] ?: '–') ?></td>
         <td><?= h($r['gate'] ?: '–') ?></td>
         <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
@@ -174,17 +231,17 @@ topbar('report', 'Monitoring Laptop');
       </tr>
       <?php endforeach; ?>
     </table></div>
-    <?php if ($n_uniq > SHOW_MAX): ?><p class="muted small">Menampilkan <?= SHOW_MAX ?> pertama. Daftar lengkap ada di CSV.</p><?php endif; ?>
+    <?php if (count($uniq_show) > SHOW_MAX): ?><p class="muted small">Menampilkan <?= SHOW_MAX ?> pertama. Pakai kotak <b>Cari ID QR</b>, atau unduh CSV untuk daftar lengkap.</p><?php endif; ?>
     <?php endif; ?>
   </section>
 
-  <?php if ($fail_only): ?>
+  <?php if ($fail_show): ?>
   <section class="card">
-    <h2><?= icon('x') ?> QR gagal yang tidak pernah berhasil <span class="badge"><?= count($fail_only) ?></span></h2>
+    <h2><?= icon('x') ?> QR gagal yang tidak pernah berhasil <span class="badge"><?= count($fail_show) ?></span></h2>
     <div class="table-wrap"><table class="table small">
       <tr><th>ID QR</th><th>Status terakhir</th><th class="right">Jumlah scan</th><th>Terakhir di-scan</th></tr>
-      <?php foreach (array_slice($fail_only, 0, SHOW_MAX) as $r): ?>
-      <tr><td><code><?= h($r['code']) ?></code></td><td><?= h(STATUS_LABEL[$r['last_status']] ?? $r['last_status']) ?></td><td class="right"><?= (int)$r['n'] ?></td><td class="mono"><?= h($r['last_at']) ?></td></tr>
+      <?php foreach (array_slice($fail_show, 0, SHOW_MAX) as $r): ?>
+      <tr<?= $r['code'] === $code ? ' class="rep-sel"' : '' ?>><td><?= code_link($r['code']) ?></td><td><?= h(STATUS_LABEL[$r['last_status']] ?? $r['last_status']) ?></td><td class="right"><?= (int)$r['n'] ?></td><td class="mono"><?= h($r['last_at']) ?></td></tr>
       <?php endforeach; ?>
     </table></div>
   </section>
