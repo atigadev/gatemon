@@ -9,7 +9,7 @@ require __DIR__ . '/../db.php';
 $id = strtoupper(preg_replace('/[^A-Za-z0-9_-]/', '', $_GET['id'] ?? ''));
 $file = $_GET['f'] ?? '';
 $base = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME']))), '/');   // contoh: /gatemon
-$origin = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
+$origin = (is_https() ? 'https' : 'http') . '://' . preg_replace('/[^A-Za-z0-9.\-:\[\]]/', '', (string)($_SERVER['HTTP_HOST'] ?? ''));   // server publik: isi agent_server_url di config
 $server = !empty($CFG['agent_server_url']) ? rtrim($CFG['agent_server_url'], '/') : $origin . $base;
 $self = $origin . $base . '/install/' . rawurlencode($id);
 const TICKET_MIN = 30;
@@ -107,12 +107,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $d) {
 $active = $d && $d['enroll_hash'] && $d['enroll_fail'] < 5 && strtotime($d['enroll_expires']) > time();
 function e($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 header('X-Robots-Tag: noindex');
+send_csp();
 ?><!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><meta name="color-scheme" content="dark light">
 <title>Instalasi agent <?= e($id) ?> - <?= e($CFG['app_name']) ?></title>
 <link rel="stylesheet" href="<?= e($base) ?>/admin/style.css?v=18">
-<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){} if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"; document.documentElement.setAttribute("data-theme",t);})();</script>
+<script nonce="<?= csp_nonce() ?>">(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){} if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"; document.documentElement.setAttribute("data-theme",t);})();</script>
 <?php if ($done): ?><meta http-equiv="refresh" content="1;url=<?= e($done['bat']) ?>"><?php endif; ?>
 </head>
 <body class="login-body">

@@ -11,3 +11,5 @@ migrasi/*.sql
 # gambar wallpaper yang diunggah (dikelola dari menu Wallpaper)
 wallpaper/*
 !wallpaper/.htaccess
+# konfigurasi khusus server (password database, HTTPS): jangan pernah di-commit
+config.local.php

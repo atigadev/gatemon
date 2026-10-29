@@ -1,0 +1,46 @@
+GATEMON - PAKET HOSTING cPanel
+
+Isi paket:
+  gatemon\        seluruh aplikasi -> diunggah ke hosting
+  database.sql    salinan database (laptop, kategori, pengaturan, akun admin, token)
+                  -> HANYA diimpor lewat phpMyAdmin. JANGAN diunggah ke public_html.
+  BACA-SAYA-CPANEL.txt  petunjuk ini
+
+LANGKAH DI cPanel
+1. SSL: menu "SSL/TLS Status" -> pastikan domain/subdomain sudah bersertifikat (AutoSSL / Let's Encrypt).
+   GateMon wajib HTTPS bila diakses dari internet.
+2. PHP: "MultiPHP Manager" -> PHP 8.x (8.1 - 8.5) untuk domain itu.
+   "Select PHP Version" -> Extensions: pastikan pdo_mysql, mbstring aktif (zip & zlib disarankan).
+3. Database: "MySQL Databases"
+   - buat database, mis. akun_gatemon
+   - buat user, mis. akun_gatemon, dengan password panjang acak (Password Generator)
+   - "Add User To Database" -> centang ALL PRIVILEGES
+4. Impor: "phpMyAdmin" -> pilih database tadi -> Import -> pilih database.sql -> Go.
+5. Unggah aplikasi: ZIP folder gatemon, unggah lewat "File Manager" ke public_html, lalu Extract.
+   Hasil: public_html/gatemon/... -> https://domain-anda.com/gatemon
+6. Konfigurasi: di File Manager, salin gatemon/config.local.example.php menjadi gatemon/config.local.php,
+   lalu Edit: isi db (host localhost, name, user, pass dari langkah 3), 'force_https' => true,
+   'agent_server_url' => 'https://domain-anda.com/gatemon'.
+   Permission config.local.php: 0600 atau 0640 (klik kanan -> Change Permissions).
+7. Buka https://domain-anda.com/gatemon/admin/login.php, login dengan akun yang sama seperti server lama.
+   Buka Pengaturan -> Pemeriksaan keamanan: semua baris harus OK. Akun dengan password lemah akan
+   diminta mengganti password saat login.
+8. Pindahkan laptop (di server LAMA): menu Agent -> update semua laptop ke agent 1.13+, lalu
+   Pengaturan -> "Pindahkan agent ke server lain" -> isi https://domain-anda.com/gatemon + password -> Kirim.
+   Tabel hasil menunjukkan laptop yang sudah pindah / alasan gagal. Laptop yang offline pindah saat menyala.
+9. Setelah semua pindah: hapus database.sql dan ZIP paket ini dari komputer Anda.
+
+BILA ADA MASALAH
+- Error 500 setelah unggah: hosting tidak mengizinkan "Options" di .htaccess. Hapus baris
+  "Options -Indexes" di gatemon/.htaccess, lalu atur "Indexes" -> "No Indexing" untuk folder gatemon di cPanel.
+- Link instalasi /install/ID-LAPTOP tidak jalan: mod_rewrite tidak aktif; pakai install/index.php?id=ID-LAPTOP.
+- Halaman putih / error: cPanel -> "Errors" atau file error_log di folder gatemon (pesan error tidak
+  ditampilkan ke pengunjung demi keamanan).
+- Database baru tanpa data (instalasi baru, bukan pindahan): isi 'setup_key' (acak, >= 20 karakter) di
+  config.local.php, buka https://domain-anda.com/gatemon/setup.php?key=KUNCI, buat akun supervisor, lalu
+  KOSONGKAN lagi setup_key.
+
+KEAMANAN
+- Paket ini berisi hash password dan token semua laptop. Simpan di tempat aman, hapus setelah dipakai.
+- Kunci tanda tangan rilis agent (gatemon-update.key) TIDAK PERNAH diunggah ke hosting.
+- Beri akun viewer untuk layar monitor; akun supervisor hanya untuk tim IT, dengan password kuat.

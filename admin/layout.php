@@ -43,12 +43,13 @@ function logo() {
 // <head> lengkap + skrip tema (dijalankan sebelum render agar tidak berkedip)
 function page_head($title, $body_class = '', $extra = '') {
     global $CFG;
+    send_csp();
     echo '<!doctype html><html lang="id"><head><meta charset="utf-8">'
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=29">'
-       . '<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
+       . '<link rel="stylesheet" href="style.css?v=30">'
+       . '<script nonce="' . csp_nonce() . '">(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
        . $extra . '</head><body' . ($body_class ? ' class="' . h($body_class) . '"' : '') . '>';
@@ -91,12 +92,12 @@ function topbar($active, $subtitle = '', $extra_right = '') {
     echo '</nav><div class="top-right">' . $extra_right . theme_button()
        . '<div class="user"><span class="avatar">' . h(strtoupper(substr($u['username'], 0, 1))) . '</span>'
        . '<span class="user-txt"><b>' . h($u['username']) . '</b><small>' . h($u['role']) . '</small></span></div>'
-       . '<a class="icon-btn" href="logout.php" title="Keluar" aria-label="Keluar">' . icon('logout') . '</a>'
+       . '<a class="icon-btn" href="logout.php?t=' . csrf_token() . '" title="Keluar" aria-label="Keluar">' . icon('logout') . '</a>'
        . '</div></div></header>';
 }
 
 function page_foot($scripts = []) {
-    echo '<script src="ui.js?v=4"></script>';
+    echo '<script src="ui.js?v=5"></script>';
     // alarm darurat & pesan baru dari laptop (menu Support) di semua halaman setelah login
     if (function_exists('current_user') && ($u = current_user())) {
         echo '<script src="support_alert.js?v=2" data-csrf="' . csrf_token() . '" data-role="' . h($u['role']) . '"></script>';

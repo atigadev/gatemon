@@ -1,6 +1,8 @@
 <?php
-// GateMon - konfigurasi server. Sesuaikan dengan XAMPP/Laragon Anda.
-return [
+// GateMon - konfigurasi server (nilai bawaan, ikut repo git: JANGAN isi password di sini).
+// Nilai khusus server (password database, HTTPS, dll) ditulis di config.local.php, yang tidak ikut git
+// dan menimpa nilai di bawah. Contoh: config.local.example.php.
+$cfg = [
     'db' => [
         'host' => '127.0.0.1',
         'name' => 'gatemon',
@@ -21,4 +23,14 @@ return [
     // Masa berlaku kode instalasi agent sekali pakai (jam)
     'enroll_valid_hours' => 24,
     'app_name' => 'GateMon',
+    // ---------- keamanan (server publik / cPanel: atur di config.local.php) ----------
+    'force_https' => false,          // true: semua akses HTTP dialihkan / ditolak, cookie hanya lewat HTTPS, HSTS aktif
+    'trust_proxy' => false,          // true hanya bila di belakang proxy/CDN yang mengirim X-Forwarded-Proto/-For (mis. Cloudflare)
+    'debug' => false,                // true: tampilkan pesan error PHP di browser (jangan di server publik)
+    'session_idle_minutes' => 240,   // keluar otomatis bila tidak ada aktivitas (dashboard yang terbuka tetap aktif)
+    'session_max_hours' => 24,       // wajib login ulang setelah ini
+    'setup_key' => '',               // isi (min. 20 karakter) agar setup.php bisa dibuka dari luar server: setup.php?key=...
 ];
+$local = __DIR__ . '/config.local.php';
+if (is_file($local)) $cfg = array_replace_recursive($cfg, (array)require $local);
+return $cfg;

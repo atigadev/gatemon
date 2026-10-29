@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 6;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12)
+const SCHEMA_VERSION = 7;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik
 
 function schema_version(PDO $pdo) {
     try {
@@ -52,6 +52,17 @@ function schema_apply(PDO $pdo) {
   password_hash VARCHAR(255) NOT NULL,
   role ENUM('viewer','supervisor') NOT NULL DEFAULT 'viewer',
   created_at DATETIME NOT NULL");
+    // keamanan akun: must_change = wajib ganti password saat login berikutnya (password lemah / direset supervisor)
+    $add('admins', $cols('admins'), 'must_change', "ADD must_change TINYINT NOT NULL DEFAULT 0, ADD pw_changed_at DATETIME NULL, ADD last_login_at DATETIME NULL, ADD last_login_ip VARCHAR(45) NULL");
+    // percobaan gagal (login admin, token agent, kode instalasi) untuk pembatasan; dibersihkan otomatis setelah 2 hari
+    $table('auth_fail', "
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  scope VARCHAR(10) NOT NULL,
+  ip VARCHAR(45) NOT NULL,
+  name VARCHAR(100) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  INDEX scope_ip (scope, ip, created_at),
+  INDEX scope_name (scope, name, created_at)");
     $table('devices', "
   id INT AUTO_INCREMENT PRIMARY KEY,
   device_key VARCHAR(50) UNIQUE NOT NULL,

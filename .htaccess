@@ -8,7 +8,7 @@ DirectoryIndex index.php
 RedirectMatch 404 /\.git(/|$)
 
 # File konfigurasi/library: hanya di-include PHP, tidak boleh dibuka langsung
-<FilesMatch "^(config|db|schema)\.php$">
+<FilesMatch "^(config|config\.local|config\.local\.example|db|schema|security)\.php$">
     Require all denied
 </FilesMatch>
 
@@ -17,13 +17,12 @@ RedirectMatch 404 /\.git(/|$)
     Require all denied
 </FilesMatch>
 
-# setup.php hanya boleh dijalankan dari laptop server itu sendiri
-<Files "setup.php">
-    Require local
-</Files>
+# setup.php memeriksa sendiri: hanya dari localhost, atau dengan setup_key di config.local.php
 
 <IfModule mod_headers.c>
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set X-Frame-Options "SAMEORIGIN"
-    Header always set Referrer-Policy "same-origin"
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "same-origin"
+    Header unset X-Powered-By
+    Header set X-Robots-Tag "noindex, nofollow"
 </IfModule>

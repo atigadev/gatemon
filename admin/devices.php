@@ -215,8 +215,8 @@ topbar('devices', 'Monitoring Laptop');
         <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll" title="Buat kode instalasi (username + password sekali pakai)" aria-label="Kode instalasi"<?= $code_active ? " onclick=\"return confirm('Kode lama untuk " . h($d['device_key']) . " masih aktif dan akan diganti. Lanjutkan?')\"" : '' ?>><?= icon('enroll') ?></button>
         <?php if ($code_active): ?><button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll_cancel" title="Batalkan kode instalasi" aria-label="Batalkan kode"><?= icon('x') ?></button><?php endif; ?>
         <button form="dl" class="icon-btn sm" name="id" value="<?= $d['id'] ?>" title="Unduh paket agent (config.json berisi token, tanpa login)" aria-label="Unduh agent"><?= icon('download') ?></button>
-        <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="regen" title="Buat token baru" aria-label="Token baru" onclick="return confirm('Buat token baru untuk <?= h($d['device_key']) ?>? Agent di laptop ini harus dipasang ulang.')"><?= icon('key') ?></button>
-        <button form="f<?= $d['id'] ?>" class="icon-btn sm danger" name="act" value="delete" title="Hapus" aria-label="Hapus" onclick="return confirm('Hapus laptop <?= h($d['device_key']) ?>?')"><?= icon('trash') ?></button>
+        <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="regen" title="Buat token baru" aria-label="Token baru" data-confirm="Buat token baru untuk <?= h($d['device_key']) ?>? Agent di laptop ini harus dipasang ulang."><?= icon('key') ?></button>
+        <button form="f<?= $d['id'] ?>" class="icon-btn sm danger" name="act" value="delete" title="Hapus" aria-label="Hapus" data-confirm="Hapus laptop <?= h($d['device_key']) ?>?"><?= icon('trash') ?></button>
       </td>
       <?php endif; ?>
     </tr>

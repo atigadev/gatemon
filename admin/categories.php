@@ -76,7 +76,7 @@ topbar('categories', 'Monitoring Laptop');
       <?php if (is_supervisor()): ?>
       <td class="actions">
         <button form="c<?= $c['id'] ?>" class="btn" name="act" value="edit">Simpan</button>
-        <button form="c<?= $c['id'] ?>" class="btn btn-danger" name="act" value="delete" onclick="return confirm('Hapus kategori <?= h($c['name']) ?>? Laptop di dalamnya tidak ikut terhapus.')">Hapus</button>
+        <button form="c<?= $c['id'] ?>" class="btn btn-danger" name="act" value="delete" data-confirm="Hapus kategori <?= h($c['name']) ?>? Laptop di dalamnya tidak ikut terhapus.">Hapus</button>
       </td>
       <?php endif; ?>
     </tr>

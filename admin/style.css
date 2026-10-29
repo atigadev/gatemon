@@ -621,3 +621,7 @@ body.sup-page.sup-alarm-on{padding-bottom:0}
 .sup-ctl select{height:32px;width:auto;padding-top:0;padding-bottom:0}
 .sup-ctl .btn{height:32px}
 .sup-ctl-st{color:var(--muted)}.sup-ctl-st.bad{color:var(--bad);font-weight:600}
+.inline-form{display:inline-flex;gap:6px;align-items:center;margin:2px 0}
+.inline-form input{width:170px;height:34px}
+.sec-table .sec-ok b{color:var(--ok)}.sec-table .sec-warn b{color:var(--warn)}.sec-table .sec-bad b{color:var(--bad)}.sec-table .sec-info b{color:var(--muted)}
+.sec-table .sec-bad{background:var(--bad-bg)}

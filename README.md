@@ -16,8 +16,9 @@ Bukan sistem validasi: halaman validasi yang sudah ada (form-scanning-gate.php) 
 
 ## Instalasi singkat
 1. Salin folder `gatemon` ke `htdocs` (XAMPP) atau `www` (Laragon) di laptop server.
-2. Sesuaikan `config.php` (user/pass MySQL), buka `http://IP-SERVER/gatemon/setup.php`, lalu hapus `setup.php`.
-3. Login `admin / admin123`, ganti password, tambah laptop di menu Devices, salin token.
+2. Salin `config.local.example.php` menjadi `config.local.php` dan isi user/pass MySQL, lalu buka
+   `http://localhost/gatemon/setup.php` di laptop server: pemeriksaan sistem + buat akun supervisor pertama.
+3. Login dengan akun itu, tambah laptop di menu Devices.
 4. Di server sudah disiapkan `agent/installer/`: installer Python 64-bit dan folder `wheels\` berisi semua library
    (Python 3.9-3.15, 64-bit) + `SHA256SUMS.txt`. Instalasi agent berjalan **offline**; installer memverifikasi
    hash setiap file dan menolak file yang berubah/tidak terdaftar. Bila Python di laptop tidak cocok (32-bit atau
@@ -211,13 +212,39 @@ Tombol **Suara** di Dashboard/Monitor membuka pengaturan (disimpan per browser):
   Windows Settings → Time & language → Speech → Add voices → **Indonesian** (sekali, perlu internet saat mengunduh).
 
 ## Keamanan akses web
-- `.htaccess` mematikan daftar isi folder, memblokir `config.php`/`db.php`, folder `agent/` dan `admin-tools/`,
-  serta file `.md/.json/.py/.bat/.reg`. Root `/gatemon/` langsung diarahkan ke halaman login.
-- `setup.php` hanya bisa dijalankan dari laptop server (`http://localhost/gatemon/setup.php`).
-- Paket agent tetap diunduh lewat menu Devices (perlu login supervisor). File `admin-tools` disalin manual.
-- Butuh Apache dengan `AllowOverride All` (default XAMPP). Di Laragon/Nginx, terapkan aturan yang sama di konfigurasi server.
-- Disarankan: beri password untuk user MySQL `root` lalu isi di `config.php`, dan ganti password `admin/admin123`.
+- **Rahasia di luar git**: password database dan pengaturan server ditulis di `config.local.php` (contoh:
+  `config.local.example.php`), bukan di `config.php`. File ini tidak ikut repo dan tidak bisa dibuka lewat web.
+- **HTTPS wajib** di server publik (`force_https => true`): HTTP dialihkan ke HTTPS, POST lewat HTTP ditolak (token tidak
+  terkirim tanpa enkripsi), HSTS aktif, cookie sesi hanya lewat HTTPS.
+- **Login**: token CSRF di form login, 10 gagal per IP / 8 gagal per username dalam 15 menit = diblokir 15 menit (tercatat di log),
+  pesan gagal selalu sama, ID sesi diganti saat login. Sesi berakhir setelah 240 menit tanpa aktivitas atau 24 jam
+  (`session_idle_minutes`, `session_max_hours`), dan langsung gugur bila password/role diganti atau akun dihapus.
+- **Password admin**: minimal 10 karakter, tidak memuat username / kata umum. Password lemah (mis. bawaan `viewer123`)
+  dipaksa diganti saat login. Ganti password wajib memasukkan password lama; supervisor bisa mereset password akun lain
+  (pemiliknya wajib menggantinya). Supervisor terakhir tidak bisa dihapus.
+- **Aksi berbahaya** (unduh paket server berisi token, pindah server agent) wajib memasukkan ulang password.
+- **Header keamanan** dari PHP (berlaku walau mod_headers mati): Content-Security-Policy dengan nonce (tanpa skrip/handler
+  inline), X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy, no-store, noindex. Pesan error PHP tidak tampil ke
+  pengunjung (dicatat di error log).
+- **Endpoint agent**: token 128-bit; banjir request token salah ditahan per IP. Kode instalasi: 5 salah per laptop = terkunci,
+  20 salah per IP dalam 15 menit = ditahan.
+- `.htaccess` memblokir file konfigurasi/library, `.git/`, `agent/`, `admin-tools/`, `migrasi/`, `wallpaper/`, file `.md/.json/.py/.bat/.sql/.zip`.
+- `setup.php`: hanya dari localhost, atau dengan `setup_key` (>= 20 karakter) di `config.local.php` lewat HTTPS. Tidak ada
+  password bawaan: akun supervisor pertama dibuat di form setup.
+- **Pemeriksaan keamanan** (Pengaturan → Pemeriksaan keamanan, supervisor): memeriksa PHP, HTTPS, cookie, konfigurasi,
+  akun, file tertinggal, dan menguji dari luar bahwa file sensitif ditolak (403/404). Jalankan setiap selesai unggah/ubah.
 
+## Server publik (cPanel)
+1. Server lama: menu **Agent** → update semua laptop ke agent **1.13+** (bisa pindah server tanpa instal ulang).
+2. Pengaturan → **Pindah / cadangkan server** → Tujuan *Hosting cPanel* → masukkan password → unduh paket.
+3. Ikuti `BACA-SAYA-CPANEL.txt` di paket: SSL, PHP 8.x + ekstensi, buat database & user, impor `database.sql`
+   lewat phpMyAdmin, unggah folder `gatemon`, buat `config.local.php` (database, `force_https => true`, `agent_server_url`).
+4. Di hosting: login, buka **Pemeriksaan keamanan**: semua baris OK.
+5. Server lama: Pengaturan → **Pindahkan agent ke server lain** → `https://domain/gatemon` + password. Tiap laptop menguji
+   server baru dengan ID + tokennya dulu; gagal = tetap di server lama dengan alasan di tabel. Server baru tidak tersambung
+   dalam 10 menit pertama = laptop kembali ke server lama.
+6. Yang tidak bisa dari internet: Radmin & live camera (IP LAN), Wake-on-LAN langsung dari server (tetap bisa lewat laptop
+   lain yang menyala di LAN yang sama). Di hosting, naikkan interval heartbeat ke 10–15 detik dan batas offline ke 60 detik.
 ## Tampilan
 - Tema gelap (default) dan terang; tombol matahari/bulan di kanan atas, pilihan disimpan per browser.
 - Responsive: di HP menu menjadi hamburger, tabel Devices menjadi daftar kartu, modal muncul dari bawah.

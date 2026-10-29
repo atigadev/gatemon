@@ -217,7 +217,7 @@ topbar('wallpaper', 'Monitoring Laptop');
         <span class="wp-tags"><?php foreach ($usage[$w['id']] ?? [] as $u): ?><span class="badge sup"><?= h($u) ?></span><?php endforeach; ?><?= empty($usage[$w['id']]) ? '<span class="badge">Tidak dipakai</span>' : '' ?></span>
       </figcaption>
       <?php if (is_supervisor() && empty($usage[$w['id']])): ?>
-      <form method="post" onsubmit="return confirm('Hapus wallpaper <?= h($w['name']) ?>?')">
+      <form method="post" data-confirm="Hapus wallpaper <?= h($w['name']) ?>?">
         <input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="delete"><input type="hidden" name="id" value="<?= $w['id'] ?>">
         <button class="btn btn-danger"><?= icon('trash') ?> Hapus</button>
       </form>
@@ -231,7 +231,7 @@ topbar('wallpaper', 'Monitoring Laptop');
   <h2><?= icon('devices') ?> Status laptop <?php if ($sum['target']): ?><span class="badge <?= $sum['ok'] === $sum['target'] ? 'sup' : '' ?>"><?= $sum['ok'] ?>/<?= $sum['target'] ?> terpasang</span><?php endif; ?></h2>
   <div class="table-wrap"><table class="table small">
     <tr><th>Laptop</th><th>Kategori</th><th>Wallpaper</th><th>Status</th></tr>
-    <?php foreach ($devs as $d): $c = $catById[$d['category_id']] ?? null; ?>
+    <?php foreach ($devs as $d): $c = $d['category_id'] !== null ? ($catById[$d['category_id']] ?? null) : null; ?>
     <tr>
       <td><b><?= h($d['name']) ?></b> <code class="muted"><?= h($d['device_key']) ?></code></td>
       <td><span class="cat-badge" style="--cat:<?= h($c['color'] ?? '#64748b') ?>"><i></i><?= h($c['name'] ?? 'Tanpa kategori') ?></span></td>

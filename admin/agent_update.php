@@ -92,7 +92,7 @@ topbar('agent_update', 'Monitoring Laptop');
     <div class="page-head" style="margin:0 0 8px"><h2 style="margin:0"><?= icon('devices') ?> Laptop <span class="badge"><?= $n_can ?> perlu update</span></h2>
     <?php if (is_supervisor()): ?><div class="actions">
       <button class="btn" name="act" value="selected" <?= $rel['ready'] ? '' : 'disabled' ?>><?= icon('download') ?> Update yang dipilih</button>
-      <button class="btn btn-primary" name="act" value="all" <?= $rel['ready'] && $n_can ? '' : 'disabled' ?> onclick="return confirm('Kirim update <?= h($rel['version']) ?> ke <?= $n_can ?> laptop?')"><?= icon('download') ?> Update semua (<?= $n_can ?>)</button>
+      <button class="btn btn-primary" name="act" value="all" <?= $rel['ready'] && $n_can ? '' : 'disabled' ?> data-confirm="Kirim update <?= h($rel['version']) ?> ke <?= $n_can ?> laptop?"><?= icon('download') ?> Update semua (<?= $n_can ?>)</button>
     </div><?php endif; ?></div>
     <div class="table-wrap"><table class="table small">
       <tr><?php if (is_supervisor()): ?><th></th><?php endif; ?><th>Laptop</th><th>Kategori</th><th>Versi</th><th>Koneksi</th><th>Status update</th></tr>

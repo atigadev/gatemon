@@ -11,3 +11,13 @@ document.addEventListener('click', e=>{
   if(nt){ const open = bar.classList.toggle('nav-open'); nt.setAttribute('aria-expanded', open); return; }
   if(bar && bar.classList.contains('nav-open') && !e.target.closest('.nav')) bar.classList.remove('nav-open');
 });
+// Konfirmasi aksi berbahaya: <button data-confirm="..."> atau <form data-confirm="...">. Teks dibaca dari atribut
+// (bukan onclick inline): aman untuk nama berisi tanda kutip dan sesuai Content-Security-Policy.
+document.addEventListener('click', e=>{
+  const b = e.target.closest('[data-confirm]');
+  if(b && b.tagName !== 'FORM' && !confirm(b.dataset.confirm)){ e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+document.addEventListener('submit', e=>{
+  const f = e.target;
+  if(f.matches && f.matches('form[data-confirm]') && !confirm(f.dataset.confirm)){ e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);

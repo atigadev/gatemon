@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1679,6 +1679,94 @@ class SupportUI:
         return self.u.DefWindowProcW(hwnd, msg, wp, lp)
 
 
+# ---------- pindah server (agent >= 1.13) ----------
+# Perintah SET_SERVER dari server lama: agent menguji dulu server baru dengan ID + token-nya (api/ping.php, harus
+# sudah berisi database yang sama). Berhasil -> hasil dilaporkan ke server LAMA, lalu config.json diganti. Server lama
+# disimpan sebagai cadangan: bila server baru tidak pernah berhasil dihubungi dalam 10 menit, agent kembali ke server lama.
+MOVE_WAIT = 600
+
+
+def _cfg_save():
+    tmp = CFG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(CFG, fh, indent=2)
+    os.replace(tmp, CFG_PATH)
+
+
+def server_url_ok(u):
+    """https://host[/path] untuk server internet; http:// hanya untuk IP LAN (tanpa enkripsi tidak aman lewat internet)."""
+    try:
+        p = urlparse(u)
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https") or not p.hostname or p.username or p.password or p.query or p.fragment:
+        return False
+    if p.scheme == "http":
+        try:
+            return ipaddress.ip_address(p.hostname).is_private
+        except ValueError:
+            return False
+    return True
+
+
+def set_server_check(payload):
+    try:
+        url = json.loads(payload).get("url", "")
+    except (ValueError, AttributeError):
+        url = payload
+    url = str(url or "").strip().rstrip("/")
+    if not server_url_ok(url):
+        raise RuntimeError("alamat server tidak valid: wajib https://... (http:// hanya untuk IP LAN)")
+    if url == SERVER:
+        raise RuntimeError("laptop ini sudah memakai server tersebut")
+    s = requests.Session()
+    s.headers.update(HEADERS)
+    try:
+        r = s.get(url + "/api/ping.php", timeout=20, allow_redirects=False)
+    except requests.exceptions.SSLError as e:
+        raise RuntimeError("sertifikat HTTPS server baru tidak valid: %s" % str(e)[:120])
+    except requests.RequestException as e:
+        raise RuntimeError("server baru tidak bisa dihubungi dari laptop ini: %s" % str(e)[:120])
+    if r.status_code == 401:
+        raise RuntimeError("server baru menolak ID/token laptop ini (database belum dipindah ke server baru?)")
+    try:
+        j = r.json()
+    except ValueError:
+        j = {}
+    if r.status_code != 200 or j.get("app") != "gatemon" or j.get("device") != CFG["device_key"]:
+        raise RuntimeError("alamat itu bukan server GateMon yang mengenal laptop ini (HTTP %s)" % r.status_code)
+    return url
+
+
+def set_server_apply(url):
+    global SERVER
+    CFG["server_url_prev"], CFG["server_url"], CFG["server_moved_at"] = SERVER, url, int(time.time())
+    _cfg_save()
+    log.warning("pindah server: %s -> %s", SERVER, url)
+    SERVER = url
+
+
+def server_move_ok():
+    """Heartbeat ke server baru berhasil: pindah server selesai, cadangan dihapus."""
+    if "server_url_prev" in CFG:
+        log.info("pindah server selesai, server lama %s tidak dipakai lagi", CFG["server_url_prev"])
+        CFG.pop("server_url_prev", None)
+        CFG.pop("server_moved_at", None)
+        _cfg_save()
+
+
+def server_move_failed():
+    """Heartbeat gagal: bila baru pindah dan server baru belum pernah berhasil selama MOVE_WAIT, kembali ke server lama."""
+    global SERVER
+    prev = CFG.get("server_url_prev")
+    if prev and time.time() - int(CFG.get("server_moved_at", 0)) > MOVE_WAIT:
+        log.error("server baru %s tidak bisa dihubungi %d menit: kembali ke %s", SERVER, MOVE_WAIT // 60, prev)
+        CFG["server_url"] = prev
+        CFG.pop("server_url_prev", None)
+        CFG.pop("server_moved_at", None)
+        _cfg_save()
+        SERVER = prev
+
 # ---------- loop utama ----------
 def main():
     global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture
@@ -1699,8 +1787,11 @@ def main():
             net_ms = int((time.time() - t) * 1000)
             if r.status_code == 401:
                 log.error("ditolak server (401): periksa device_key/token di config.json")
+                server_move_failed()
             else:
                 j = r.json()
+                if r.status_code == 200:
+                    server_move_ok()
                 if r.status_code == 200 and "update_result" in body:
                     update_confirmed()                           # versi baru sehat / laporan rollback terkirim
                 interval = max(2, min(300, int(j.get("interval", interval))))  # diatur di menu Pengaturan
@@ -1730,6 +1821,15 @@ def main():
                     if cmd["type"] == "UPDATE_AGENT":            # hasil dilaporkan thread update sendiri
                         start_update(cmd["id"])
                         continue
+                    if cmd["type"] == "SET_SERVER":              # hasil dilaporkan ke server lama SEBELUM pindah
+                        try:
+                            new = set_server_check(cmd.get("payload") or "")
+                        except Exception as e:
+                            report(cmd["id"], "failed", str(e))
+                            continue
+                        report(cmd["id"], "done", "server baru tersambung, laptop pindah ke " + new)
+                        set_server_apply(new)
+                        break                                    # perintah lain diambil dari server baru
                     try:
                         report(cmd["id"], "done", run_command(cmd))
                     except Exception as e:
@@ -1744,6 +1844,7 @@ def main():
                 restart_for_update()                             # hasil update sudah dilaporkan; penjaga mengambil alih
         except Exception as e:
             net_ms = None
+            server_move_failed()
             log.warning("heartbeat gagal: %s", e)
         time.sleep(interval)
 

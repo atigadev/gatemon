@@ -53,12 +53,18 @@ $n = (int)$pdo->query("SELECT COUNT(*) FROM devices")->fetchColumn();
 $ng = (int)$pdo->query("SELECT COUNT(*) FROM devices WHERE mode='gate'")->fetchColumn();
 $csrf = csrf_token();
 $ro = is_supervisor() ? '' : 'disabled';
+// hasil perintah pindah server terakhir per laptop (menu "Pindahkan agent ke server lain")
+$moves = $pdo->query("SELECT d.name, d.agent_version, c.status, c.result, c.payload, c.created_at FROM devices d
+    LEFT JOIN (SELECT device_id, MAX(id) id FROM commands WHERE type='SET_SERVER' GROUP BY device_id) x ON x.device_id=d.id
+    LEFT JOIN commands c ON c.id=x.id ORDER BY d.name")->fetchAll();
+$any_move = (bool)array_filter($moves, function ($m) { return $m['status'] !== null; });
 
 page_head('Pengaturan');
 topbar('settings', 'Monitoring Laptop');
 ?>
 <main class="page">
-  <div class="page-head"><div><h1>Pengaturan</h1><p class="muted">Waktu heartbeat agent dan refresh dashboard. Berlaku langsung tanpa memasang ulang agent.</p></div></div>
+  <div class="page-head"><div><h1>Pengaturan</h1><p class="muted">Waktu heartbeat agent dan refresh dashboard. Berlaku langsung tanpa memasang ulang agent.</p></div>
+    <?php if (is_supervisor()): ?><a class="btn" href="keamanan.php"><?= icon('shield') ?> Pemeriksaan keamanan</a><?php endif; ?></div>
 <?= $err ? '<p class="notice error">' . h($err) . '</p>' : flash($msg) ?>
 <?php if (!is_supervisor()): ?><p class="notice">Hanya supervisor yang bisa mengubah pengaturan.</p><?php endif; ?>
 
@@ -86,7 +92,7 @@ topbar('settings', 'Monitoring Laptop');
     <?php endforeach; ?>
     <?php if (is_supervisor()): ?>
     <div class="actions set-actions">
-      <button class="btn" name="act" value="reset" formnovalidate onclick="return confirm('Kembalikan semua pengaturan ke bawaan?')">Kembalikan bawaan</button>
+      <button class="btn" name="act" value="reset" formnovalidate data-confirm="Kembalikan semua pengaturan ke bawaan?">Kembalikan bawaan</button>
       <button class="btn btn-primary" name="act" value="save"><?= icon('save') ?> Simpan</button>
     </div>
     <?php endif; ?>
@@ -110,19 +116,45 @@ topbar('settings', 'Monitoring Laptop');
   <h2><?= icon('download') ?> Pindah / cadangkan server</h2>
   <p class="muted">Satu ZIP berisi seluruh GateMon seperti server ini: kode, <code>config.php</code>, agent + installer Python &amp; wheels,
     dan salinan database (laptop, kategori, pengaturan, akun admin, token). Di server tujuan cukup ekstrak lalu jalankan
-    <code>INSTALL-SERVER.bat</code>.</p>
+    <code>INSTALL-SERVER.bat</code> (XAMPP), atau unggah ke hosting lalu impor <code>database.sql</code> lewat phpMyAdmin (cPanel).</p>
   <form method="post" action="export_server.php" class="export-form">
     <input type="hidden" name="csrf" value="<?= $csrf ?>">
-    <label class="check"><input type="checkbox" name="history" value="1" checked> Sertakan riwayat (log, perintah, screenshot, hasil scan)</label>
+    <label>Tujuan <select name="format"><option value="xampp">Server Windows + XAMPP (INSTALL-SERVER.bat)</option><option value="cpanel">Hosting cPanel (unggah + phpMyAdmin)</option></select></label>
+    <label class="check"><input type="checkbox" name="history" value="1"> Sertakan riwayat (log, perintah, screenshot, hasil scan)</label>
+    <label>Password Anda <input type="password" name="password" required autocomplete="current-password" maxlength="200"></label>
     <button class="btn btn-primary"><?= icon('download') ?> Unduh paket server</button>
   </form>
   <p class="notice warn-notice small">Paket berisi hash password &amp; token laptop. Simpan di tempat aman dan hapus setelah dipakai.
-    Agar agent tidak perlu dipasang ulang, beri server baru <b>IP yang sama</b> dengan server ini.</p>
+    Agar agent tidak perlu dipasang ulang, beri server baru <b>IP yang sama</b>, atau pakai <b>Pindahkan agent ke server lain</b> di bawah.</p>
+</section>
+<section class="card" id="pindah-agent">
+  <h2><?= icon('enroll') ?> Pindahkan agent ke server lain <span class="badge">agent 1.13+</span></h2>
+  <p class="muted">Untuk pindah ke server baru (mis. hosting cPanel) <b>tanpa memasang ulang agent</b>. Urutan:
+    1) server baru sudah berjalan dengan database dari paket di atas, 2) kirim perintah ini dari server <b>lama</b>.
+    Tiap laptop menguji dulu server baru dengan ID + tokennya; bila gagal (alamat salah, sertifikat HTTPS tidak valid,
+    database belum dipindah) laptop tetap di server ini dan alasannya tampil di tabel. Bila server baru tiba-tiba tidak
+    bisa dihubungi dalam 10 menit pertama, laptop kembali ke server ini.</p>
+  <form method="post" action="server_move.php" class="export-form" data-confirm="Pindahkan SEMUA laptop (agent 1.13+) ke server baru?">
+    <input type="hidden" name="csrf" value="<?= $csrf ?>">
+    <label>Alamat server baru <input type="url" name="url" required maxlength="300" placeholder="https://monitor.domain-anda.com/gatemon" pattern="https?://.+"></label>
+    <label>Password Anda <input type="password" name="password" required autocomplete="current-password" maxlength="200"></label>
+    <button class="btn btn-primary">Kirim ke semua laptop</button>
+  </form>
+  <?php if ($any_move): ?>
+  <div class="table-wrap"><table class="table small">
+    <tr><th>Laptop</th><th>Agent</th><th>Status</th><th>Hasil</th></tr>
+    <?php foreach ($moves as $m): ?>
+    <tr><td><?= h($m['name']) ?></td><td class="muted"><?= h($m['agent_version'] ?: '–') ?></td>
+      <td><?= $m['status'] === null ? '<span class="muted">–</span>' : '<span class="badge' . ($m['status'] === 'done' ? ' sup' : '') . '">' . h(['pending' => 'menunggu', 'sent' => 'diproses', 'done' => 'pindah', 'failed' => 'gagal'][$m['status']] ?? $m['status']) . '</span> <small class="muted">' . h($m['created_at']) . '</small>' ?></td>
+      <td class="muted"><?= h((string)$m['result']) ?></td></tr>
+    <?php endforeach; ?>
+  </table></div>
+  <?php endif; ?>
 </section>
 <?php endif; ?>
 </div>
 </main>
-<script>
+<script nonce="<?= csp_nonce() ?>">
 // perkiraan beban dihitung ulang saat angka diubah
 (function(){
   const L = document.getElementById('load'), n = +L.dataset.n, ng = +L.dataset.ng, v = id => +document.getElementById('s-' + id).value || 1;

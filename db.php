@@ -1,6 +1,8 @@
 <?php
 $CFG = require __DIR__ . '/config.php';
 date_default_timezone_set('Asia/Jakarta');
+require_once __DIR__ . '/security.php';
+security_bootstrap();
 
 function db() {
     static $pdo = null;
@@ -61,10 +63,17 @@ function auth_device() {
     $key = $_SERVER['HTTP_X_DEVICE_KEY'] ?? '';
     $tok = $_SERVER['HTTP_X_DEVICE_TOKEN'] ?? '';
     if ($key === '' || $tok === '') json_out(['ok' => false, 'error' => 'missing credentials'], 401);
+    // Token 128-bit acak tidak bisa ditebak; batas ini menahan banjir request. Longgar karena di hosting semua laptop
+    // satu venue keluar lewat satu IP publik: satu laptop bertoken lama (heartbeat tiap 5 dtk) tidak boleh memblokir semuanya.
+    $ip = client_ip();
+    if (auth_fail_count('device', $ip, null, 10) >= 600) json_out(['ok' => false, 'error' => 'terlalu banyak percobaan, coba lagi nanti'], 429);
     $st = db()->prepare("SELECT * FROM devices WHERE device_key = ?");
-    $st->execute([$key]);
+    $st->execute([(string)$key]);
     $d = $st->fetch();
-    if (!$d || !hash_equals($d['token'], $tok)) json_out(['ok' => false, 'error' => 'unauthorized'], 401);
+    if (!$d || !hash_equals((string)$d['token'], (string)$tok)) {
+        auth_fail_add('device', $ip, $key);
+        json_out(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
     return $d;
 }
 
@@ -99,14 +108,18 @@ function enroll_verify($user, $pass, $from) {
     $pass = strtoupper(preg_replace('/[\s-]/', '', (string)$pass));
     $no = function ($msg, $code = 401) { usleep(800000); return ['ok' => false, 'error' => $msg, 'code' => $code]; };
     if ($user === '' || $pass === '') return $no('username dan password wajib diisi', 400);
+    // selain kunci 5x salah per laptop: satu IP yang mencoba banyak laptop ditahan 15 menit
+    $ip = client_ip();
+    if (auth_fail_count('enroll', $ip) >= 20) return $no('terlalu banyak percobaan dari alamat ini, coba lagi 15 menit lagi', 429);
     $st = $pdo->prepare("SELECT * FROM devices WHERE device_key=?");
     $st->execute([$user]);
     $d = $st->fetch();
-    if (!$d || !$d['enroll_hash']) return $no('username atau password salah, atau kode instalasi belum dibuat');
+    if (!$d || !$d['enroll_hash']) { auth_fail_add('enroll', $ip, $user); return $no('username atau password salah, atau kode instalasi belum dibuat'); }
     if ($d['enroll_fail'] >= 5) return $no('kode instalasi terkunci karena terlalu banyak percobaan salah; minta supervisor membuat kode baru', 423);
     if ($d['enroll_expires'] && strtotime($d['enroll_expires']) < time()) return $no('kode instalasi sudah kedaluwarsa; minta supervisor membuat kode baru', 410);
     if (!password_verify($pass, $d['enroll_hash'])) {
         $pdo->prepare("UPDATE devices SET enroll_fail=enroll_fail+1 WHERE id=?")->execute([$d['id']]);
+        auth_fail_add('enroll', $ip, $user);
         log_event($d['id'], 'warn', "{$d['name']}: percobaan instalasi agent dengan password salah" . ($from ? " dari $from" : ''));
         return $no('username atau password salah');
     }
