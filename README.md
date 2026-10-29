@@ -25,9 +25,9 @@ Bukan sistem validasi: halaman validasi yang sudah ada (form-scanning-gate.php) 
    versi lain), Python dari paket dipasang. Perbarui wheels dengan `agent/buat-wheels.ps1` (lihat BACA-SAYA di folder itu).
 5. Di menu Devices klik **Kode instalasi** (ikon masuk) pada laptop: muncul link, username (= ID laptop) dan
    password sekali pakai (berlaku `enroll_valid_hours`, bawaan 24 jam, terkunci setelah 5x salah).
-6. Di laptop gate buka `http://IP-SERVER/gatemon/install/ID-LAPTOP`, masukkan username & password, lalu jalankan
-   `Install-GateMon-ID.bat` yang terunduh. Installer mengunduh paket (agent, config.json, Python, wheels),
-   memasang Python bila belum ada, library, menyalin ke `C:\GateMon-Agent`, dan menjalankan agent
+6. Di laptop gate buka `http://IP-SERVER/gatemon/install/ID-LAPTOP`, masukkan username & password: paket ZIP
+   (agent, config.json, Python, wheels) terunduh. Klik kanan → **Extract All**, lalu klik dua kali `install_agent.bat`.
+   Installer tidak mengunduh apa pun (installer .bat pengunduh lama diblokir antivirus sebagai "Virus detected"), memasang Python bila belum ada, library, menyalin ke `C:\GateMon-Agent`, dan menjalankan agent
    (tugas terjadwal saat login, tetap jalan saat baterai, restart otomatis). Link unduhan berlaku 30 menit.
    Kode langsung hangus dan token lama tidak berlaku lagi.
    Alternatif: **Installer umum (ZIP)** (login di jendela installer) atau **ZIP per laptop** (config.json berisi token, tanpa login).

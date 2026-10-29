@@ -1,5 +1,5 @@
 # /gatemon/install/ID-LAPTOP  ->  index.php?id=ID-LAPTOP
-# /gatemon/install/ID-LAPTOP/run.bat atau /paket.zip  ->  index.php?id=...&f=...
+# /gatemon/install/ID-LAPTOP/paket.zip (run.bat lama: dijawab 410)  ->  index.php?id=...&f=...
 RewriteEngine On
 RewriteRule ^([A-Za-z0-9_-]+)/?$ index.php?id=$1 [L,QSA]
 RewriteRule ^([A-Za-z0-9_-]+)/(run\.bat|paket\.zip)$ index.php?id=$1&f=$2 [L,QSA]

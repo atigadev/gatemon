@@ -2,8 +2,7 @@
 // Halaman instalasi agent di laptop gate: http://SERVER/gatemon/install/ID-LAPTOP
 //  GET  /install/ID              -> form username + password sekali pakai
 //  POST /install/ID              -> verifikasi kode (hangus + token baru), buat tiket unduhan 30 menit
-//  GET  /install/ID/run.bat?t=   -> installer 1 klik: unduh paket, ekstrak, pasang semuanya
-//  GET  /install/ID/paket.zip?t= -> paket lengkap (agent + config.json + python + wheels)
+//  GET  /install/ID/paket.zip?t= -> paket lengkap (agent + config.json + python + wheels): Extract All lalu install_agent.bat
 require __DIR__ . '/../db.php';
 
 $id = strtoupper(preg_replace('/[^A-Za-z0-9_-]/', '', $_GET['id'] ?? ''));
@@ -31,35 +30,13 @@ if ($file === 'run.bat' || $file === 'paket.zip') {
         header('Content-Type: text/plain; charset=utf-8');
         exit("Link unduhan tidak berlaku atau sudah kedaluwarsa ($id).\r\nBuka $self lalu login ulang dengan kode instalasi baru.\r\n");
     }
+    // Installer .bat pengunduh (bat -> PowerShell unduh ZIP -> jalankan skrip) dihapus: pola itu diblokir antivirus
+    // ("Failed - Virus detected" di Windows Defender). Sekarang paket ZIP diunduh langsung, diekstrak, lalu
+    // install_agent.bat di dalamnya dijalankan (tidak mengunduh apa pun). Link .bat lama: arahkan ke cara baru.
     if ($file === 'run.bat') {
-        $zipUrl = "$self/paket.zip?t=$t";
-        $exp = date('d/m/Y H:i', strtotime($d['install_ticket_expires']));
-        $bat = [
-            '@echo off',
-            "REM GateMon Agent v" . agent_version() . " - installer 1 klik untuk $id. Link unduhan berlaku sampai $exp.",
-            'REM Klik dua kali file ini; izin Administrator akan diminta.',
-            'net session >nul 2>&1',
-            'if not errorlevel 1 goto run',
-            'echo Meminta izin Administrator...',
-            "powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"",
-            'exit /b',
-            ':run',
-            "title GateMon Agent v" . agent_version() . " - instalasi $id",
-            "set \"GM_URL=$zipUrl\"",
-            'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference=\'Stop\'; $ProgressPreference=\'SilentlyContinue\';'
-                . ' [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;'
-                . ' $d=Join-Path $env:TEMP \'GateMon-Agent-Setup\'; if(Test-Path $d){ Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue };'
-                . ' New-Item -ItemType Directory -Force $d | Out-Null; $z=Join-Path $d \'paket.zip\';'
-                . ' try { Write-Host \'Mengunduh paket GateMon Agent...\'; Invoke-WebRequest -Uri $env:GM_URL -OutFile $z -UseBasicParsing;'
-                . ' Write-Host \'Mengekstrak...\'; Expand-Archive -Path $z -DestinationPath $d -Force }'
-                . ' catch { Write-Host (\'GAGAL mengunduh paket: \' + $_.Exception.Message) -ForegroundColor Red; Write-Host \'Login ulang di halaman instalasi untuk mendapat link baru.\'; exit 1 };'
-                . ' $s=Get-ChildItem $d -Recurse -Filter install_agent.ps1 | Select-Object -First 1; & $s.FullName"',
-            'if errorlevel 1 pause',
-        ];
-        header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="Install-GateMon-' . $id . '-v' . agent_version() . '.bat"');
-        header('Cache-Control: no-store');
-        exit(implode("\r\n", $bat) . "\r\n");
+        http_response_code(410);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit("Installer .bat sudah diganti paket ZIP. Buka $self lalu login ulang dengan kode instalasi.\r\n");
     }
     // paket.zip
     // ZIP dibuat lewat zip_create(): tetap jalan walau ekstensi PHP zip belum aktif
@@ -99,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $d) {
             $t = bin2hex(random_bytes(24));
             db()->prepare("UPDATE devices SET install_ticket=?, install_ticket_expires=? WHERE id=?")
                 ->execute([hash('sha256', $t), date('Y-m-d H:i:s', time() + TICKET_MIN * 60), $d['id']]);
-            $done = ['bat' => "$self/run.bat?t=$t", 'zip' => "$self/paket.zip?t=$t"];
+            $done = ['zip' => "$self/paket.zip?t=$t"];
         }
     }
     if ($err) { $st = db()->prepare("SELECT * FROM devices WHERE id=?"); $st->execute([$d['id']]); $d = array_merge($d, $st->fetch()); }
@@ -114,7 +91,7 @@ send_csp();
 <title>Instalasi agent <?= e($id) ?> - <?= e($CFG['app_name']) ?></title>
 <link rel="stylesheet" href="<?= e($base) ?>/admin/style.css?v=18">
 <script nonce="<?= csp_nonce() ?>">(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){} if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"; document.documentElement.setAttribute("data-theme",t);})();</script>
-<?php if ($done): ?><meta http-equiv="refresh" content="1;url=<?= e($done['bat']) ?>"><?php endif; ?>
+<?php if ($done): ?><meta http-equiv="refresh" content="1;url=<?= e($done['zip']) ?>"><?php endif; ?>
 </head>
 <body class="login-body">
 <div class="login-box install-box">
@@ -125,14 +102,13 @@ send_csp();
   <p class="notice error">Laptop <b><?= e($id ?: '(kosong)') ?></b> tidak terdaftar. Periksa alamat: <code><?= e($origin . $base) ?>/install/ID-LAPTOP</code></p>
 <?php elseif ($done): ?>
   <div class="inst-dev"><b><?= e($d['name']) ?></b><code><?= e($id) ?></code></div>
-  <p class="notice">Login berhasil. Unduhan <b>Install-GateMon-<?= e($id) ?>-v<?= e(agent_version()) ?>.bat</b> dimulai otomatis.</p>
+  <p class="notice">Login berhasil. Unduhan <b>GateMon-Agent-<?= e($id) ?>-v<?= e(agent_version()) ?>.zip</b> dimulai otomatis.</p>
   <ol class="steps">
-    <li>Buka file <b>Install-GateMon-<?= e($id) ?>-v<?= e(agent_version()) ?>.bat</b> yang terunduh (klik dua kali).<br><span class="muted">Bila muncul "Windows protected your PC", klik <i>More info</i> lalu <i>Run anyway</i>.</span></li>
-    <li>Setujui izin Administrator.</li>
-    <li>Tunggu sampai selesai: paket diunduh, Python dan library dipasang, agent langsung berjalan.</li>
+    <li>Buka folder Downloads, klik kanan file ZIP tadi → <b>Extract All…</b> → <b>Extract</b>.<br><span class="muted">Jangan dijalankan langsung dari dalam ZIP.</span></li>
+    <li>Di folder hasil ekstrak, klik dua kali <b>install_agent.bat</b>.<br><span class="muted">Bila muncul "Windows protected your PC", klik <i>More info</i> lalu <i>Run anyway</i>.</span></li>
+    <li>Setujui izin Administrator, tunggu sampai selesai: Python dan library dipasang dari paket (tanpa internet), agent langsung berjalan.</li>
   </ol>
-  <a class="btn btn-primary" href="<?= e($done['bat']) ?>">Unduh ulang installer (.bat)</a>
-  <a class="btn" href="<?= e($done['zip']) ?>">Atau unduh paket ZIP lengkap</a>
+  <a class="btn btn-primary" href="<?= e($done['zip']) ?>">Unduh ulang paket ZIP</a>
   <p class="muted small">Link unduhan berlaku <?= TICKET_MIN ?> menit dan hanya untuk laptop ini. Kode instalasi sudah hangus.</p>
 <?php else: ?>
   <div class="inst-dev"><b><?= e($d['name']) ?></b><code><?= e($id) ?></code><?= $d['category_name'] ? '<span class="badge">' . e($d['category_name']) . '</span>' : '' ?></div>
