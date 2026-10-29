@@ -615,3 +615,9 @@ body.sup-alarm-on .sup-toast{bottom:auto;top:80px}
 @media (max-width:820px){ .sup-wrap{grid-template-columns:1fr}.sup-side{max-height:300px;min-height:0}.sup-main{height:70vh} .msg{max-width:92%} }
 .sup-page .sup-alarm{bottom:auto;top:84px}
 body.sup-page.sup-alarm-on{padding-bottom:0}
+.sup-head{display:flex;flex-direction:column;gap:8px}
+.sup-ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.sup-ctl-lbl{font-weight:600;color:var(--text-2)}
+.sup-ctl select{height:32px;width:auto;padding-top:0;padding-bottom:0}
+.sup-ctl .btn{height:32px}
+.sup-ctl-st{color:var(--muted)}.sup-ctl-st.bad{color:var(--bad);font-weight:600}

@@ -61,6 +61,19 @@
     const t = el('div'); t.append(el('h2', '', d.name));
     t.append(el('small', 'muted', [d.category_name, d.gate, d.ip, d.state === 'online' ? 'online' : 'offline', d.agent_version ? 'agent ' + d.agent_version : ''].filter(Boolean).join(' · ')));
     head.append(t);
+    // tombol Chat Support / DARURAT di layar laptop: pilihan per laptop + status yang dilaporkan agent
+    const ctl = el('div', 'sup-ctl'); ctl.id = 'sup-ctl';
+    const lbl = el('span', 'sup-ctl-lbl', 'Tombol di laptop:');
+    ctl.append(lbl);
+    if(SUP){
+      const sel = el('select'); sel.id = 'sup-mode'; sel.title = 'Tampil/sembunyi tombol Chat Support & DARURAT di laptop ini';
+      [['', 'Ikut Pengaturan'], ['1', 'Selalu tampil'], ['0', 'Sembunyikan']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; sel.append(o); });
+      const show = el('button', 'btn', 'Tampilkan di layar'); show.type = 'button'; show.dataset.show = '0'; show.title = 'Munculkan lagi tombol di layar laptop';
+      const chat = el('button', 'btn', 'Buka chat di layar laptop'); chat.type = 'button'; chat.dataset.show = '1'; chat.title = 'Tombol tampil + jendela chat terbuka di laptop';
+      ctl.append(sel, show, chat);
+    }
+    ctl.append(el('span', 'sup-ctl-st', ''));
+    head.append(ctl);
     const emg = el('div', 'sup-emg'); emg.hidden = true; emg.id = 'sup-emg';
     emg.append(el('b', '', 'DARURAT belum ditangani'), el('span', 'muted', ''));
     if(SUP){ const a = el('button', 'btn btn-danger', 'Tangani sekarang'); a.type = 'button'; a.id = 'sup-ack'; emg.append(a); }
@@ -90,6 +103,23 @@
     b.append(meta);
     return b;
   }
+  const STATE = {shown: 'tampil di layar ✓', off: 'tersembunyi', starting: 'sedang dimunculkan…'};
+  function paintCtl(j){
+    const d = j.device, st = main.querySelector('.sup-ctl-st'); if(!st) return;
+    const sel = document.getElementById('sup-mode');
+    if(sel && document.activeElement !== sel) sel.value = d.support_overlay;
+    const want = d.support_on ? 'aktif' : 'nonaktif';
+    let txt;
+    if(!d.can_show) txt = d.supported ? 'agent ' + d.agent_version + ' belum melaporkan status tombol (update ke 1.12)' : 'belum ada (agent ' + (d.agent_version || '?') + ')';
+    else if(d.state !== 'online') txt = 'laptop offline';
+    else if((d.support_state || '').startsWith('error')) txt = 'GAGAL tampil: ' + d.support_state.slice(6);
+    else txt = STATE[d.support_state] || 'belum dilaporkan';
+    st.textContent = '(' + want + (d.support_overlay === '' ? ' dari Pengaturan: ' + (j.global_on ? 'aktif' : 'nonaktif') : '') + ') · ' + txt;
+    st.classList.toggle('bad', /^GAGAL/.test(txt));
+    const c = j.show_cmd;
+    if(c) st.textContent += ' · perintah ' + hm(c.created_at) + ': ' + ({pending: 'menunggu', sent: 'terkirim'}[c.status] || (c.status === 'done' ? 'berhasil' : 'gagal') + (c.result ? ' (' + c.result + ')' : ''));
+    main.querySelectorAll('[data-show]').forEach(b => { b.disabled = !d.can_show; if(!d.can_show) b.title = 'Perlu agent 1.12+ (update lewat menu Agent)'; });
+  }
   function paintSeen(){
     main.querySelectorAll('.msg.me').forEach(b => { const s = b.querySelector('.msg-seen'); if(s) s.textContent = +b.dataset.id <= seenUpto ? ' · dibaca ✓✓' : ' · terkirim ✓'; });
   }
@@ -101,6 +131,7 @@
       const j = await api({act: 'thread', dev, since});
       if(want !== dev) return;
       if(!info){ info = j.device; frame(info); }
+      paintCtl(j);
       const list = document.getElementById('sup-msgs');
       const atBottom = since === 0 || list.scrollHeight - list.scrollTop - list.clientHeight < 40;
       let lastDay = list.dataset.day || '';
@@ -122,6 +153,17 @@
   main.addEventListener('click', async e => {
     const q = e.target.closest('[data-quick]');
     if(q){ const ta = main.querySelector('textarea'); ta.value = q.dataset.quick; ta.focus(); return; }
+    const sh = e.target.closest('[data-show]');
+    if(sh){
+      sh.disabled = true;
+      try{
+        const j = await api({act: 'show', dev, chat: sh.dataset.show}, true);
+        if(j.forced) alert('Tombol di laptop ini tadinya tersembunyi; sekarang diatur "Selalu tampil".');
+        await loadThread();
+      }catch(err){ alert('Gagal: ' + err.message); }
+      finally{ sh.disabled = false; }
+      return;
+    }
     if(e.target.id === 'sup-ack'){
       e.target.disabled = true;
       // dimuat ulang penuh: pesan darurat yang sudah tampil ikut berubah menjadi "ditangani"
@@ -129,6 +171,18 @@
       catch(err){ alert('Gagal: ' + err.message); }
       finally{ e.target.disabled = false; }
     }
+  });
+  main.addEventListener('change', async e => {
+    if(e.target.id !== 'sup-mode') return;
+    try{ await api({act: 'mode', dev, mode: e.target.value}, true); await loadThread(); }
+    catch(err){ alert('Gagal: ' + err.message); }
+  });
+  document.getElementById('sup-show-all')?.addEventListener('click', async e => {
+    if(!confirm('Munculkan lagi tombol Chat Support & DARURAT di layar semua laptop (yang tombolnya aktif)?')) return;
+    e.target.disabled = true;
+    try{ const j = await api({act: 'show_all'}, true); alert('Perintah dikirim ke ' + j.count + ' laptop.' + (j.old ? ' ' + j.old + ' laptop masih agent lama (perlu 1.12+).' : '')); }
+    catch(err){ alert('Gagal: ' + err.message); }
+    finally{ e.target.disabled = false; }
   });
   main.addEventListener('keydown', e => {
     if(e.target.tagName === 'TEXTAREA' && e.key === 'Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); e.target.form.requestSubmit(); }

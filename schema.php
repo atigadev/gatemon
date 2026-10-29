@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 5;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11)
+const SCHEMA_VERSION = 6;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12)
 
 function schema_version(PDO $pdo) {
     try {
@@ -114,6 +114,8 @@ function schema_apply(PDO $pdo) {
     $add('devices', $d, 'wallpaper_id', "ADD wallpaper_id INT NULL AFTER agent_version");
     // Kebijakan daya & Windows Update yang sedang berlaku di laptop (agent >= 1.10)
     $add('devices', $d, 'power_state', "ADD power_state VARCHAR(20) NULL, ADD winupdate_state VARCHAR(10) NULL, ADD policy_err VARCHAR(200) NULL");
+    // tombol Chat Support & DARURAT per laptop: NULL = ikut menu Pengaturan, 1 = tampil, 0 = sembunyi; support_state dilaporkan agent
+    $add('devices', $d, 'support_overlay', "ADD support_overlay TINYINT NULL, ADD support_state VARCHAR(220) NULL");
     // gate_url boleh berisi beberapa URL (1 per baris): dibuka berdampingan kiri-kanan oleh agent >= 1.8
     if (stripos($d['gate_url'] ?? '', 'varchar(2000)') === false) {
         $pdo->exec("ALTER TABLE devices MODIFY gate_url VARCHAR(2000) NOT NULL DEFAULT ''");

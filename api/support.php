@@ -5,7 +5,7 @@
 require __DIR__ . '/../db.php';
 $d = auth_device();
 $pdo = db();
-if (!setting('support_overlay')) json_out(['ok' => false, 'error' => 'chat support dinonaktifkan di menu Pengaturan'], 403);
+if (!support_on($d)) json_out(['ok' => false, 'error' => 'chat support dinonaktifkan untuk laptop ini'], 403);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     $since = max(0, (int)($_GET['since'] ?? 0));

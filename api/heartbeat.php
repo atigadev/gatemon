@@ -140,6 +140,12 @@ if (!empty($b['support_err'])) {
     if (!$st->fetchColumn()) log_event($d['id'], 'warn', "{$d['name']}: tombol support gagal tampil (" . mb_substr((string)$b['support_err'], 0, 200) . ")");
 }
 
+// Status tombol support di layar laptop (agent >= 1.12): shown / off / starting / error:...; ditulis hanya bila berubah
+if (isset($b['support_ui'])) {
+    $ss = mb_substr(preg_replace('/[\x00-\x1F\x7F]/', ' ', (string)$b['support_ui']), 0, 220);
+    if ($ss !== (string)$d['support_state']) $pdo->prepare("UPDATE devices SET support_state=? WHERE id=?")->execute([$ss, $d['id']]);
+}
+
 // Ambil perintah yang menunggu dan tandai sebagai terkirim
 $st = $pdo->prepare("SELECT id, type, payload FROM commands WHERE device_id=? AND status='pending' ORDER BY id");
 $st->execute([$d['id']]);

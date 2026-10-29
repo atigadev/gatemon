@@ -98,6 +98,13 @@ Di pojok kanan bawah layar laptop ada dua tombol kecil yang selalu di atas jende
 - **DARURAT**: sekali klik langsung terkirim (tanpa konfirmasi). Status di tombol: MENGIRIM… → TERKIRIM ✓ → DITANGANI ✓.
   Bila jaringan putus, agent terus mencoba mengirim ulang sampai diterima server.
 - Tombol **tidak mengambil fokus keyboard**, jadi scanner barcode tetap mengetik ke halaman gate.
+- Tombol **tidak bisa ditutup** dari laptop: tidak ada tombol X, Alt+F4 tidak mengenainya, dan tidak muncul di taskbar/Alt+Tab.
+  Hanya jendela chat yang bisa ditutup (X / Esc), lalu dibuka lagi lewat tombol Chat Support atau **Ctrl+Alt+S** (agent 1.12+).
+  Bila tampilan tombol berhenti karena error, agent memunculkannya lagi otomatis dalam ±1 menit.
+
+Di menu **Support** (agent 1.12+), tiap laptop punya pilihan **Ikut Pengaturan / Selalu tampil / Sembunyikan**, status tombol
+yang dilaporkan laptop (tampil di layar / tersembunyi / gagal), serta tombol **Tampilkan di layar** dan **Buka chat di layar laptop**.
+**Tampilkan tombol di semua laptop** memunculkan ulang tombol di semua laptop yang tombolnya aktif.
 
 Di server, menu **Support** berisi percakapan per laptop (balas, tanda dibaca ✓✓, balasan cepat). Darurat yang belum
 ditangani memunculkan banner merah, sirene, dan kalimat yang dibacakan di **semua halaman admin** yang terbuka

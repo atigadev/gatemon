@@ -329,6 +329,12 @@ const SUPPORT_MIN = '1.11.0';    // agent mulai versi ini punya tombol Chat Supp
 const SUPPORT_ACK_SHOW = 120;    // detik: laptop menampilkan "DITANGANI" selama ini setelah darurat ditangani
 const SUPPORT_KEEP_DAYS = 90;    // pesan yang lebih lama dihapus otomatis
 const SUPPORT_EMERGENCY_TEXT = 'DARURAT - petugas membutuhkan bantuan segera';
+const SUPPORT_SHOW_MIN = '1.12.0';   // agent mulai versi ini menerima perintah "tampilkan tombol / buka chat" dan melaporkan status tombol
+const SUPPORT_MODES = ['' => 'Ikut menu Pengaturan', '1' => 'Selalu tampil', '0' => 'Sembunyikan'];
+// Tombol tampil di laptop ini? Pilihan per laptop (menu Support) mengalahkan menu Pengaturan
+function support_on($d) {
+    return isset($d['support_overlay']) && $d['support_overlay'] !== null ? (bool)$d['support_overlay'] : (bool)setting('support_overlay');
+}
 // Isi pesan: UTF-8 valid, tanpa karakter kontrol (kecuali baris baru), maks 1000 karakter
 function support_text($s) {
     $s = mb_convert_encoding((string)$s, 'UTF-8', 'UTF-8');
@@ -337,7 +343,7 @@ function support_text($s) {
 }
 // Untuk balasan heartbeat: id pesan terakhir dari support (agent mengambil pesan bila lebih baru) + status darurat
 function support_hb($d) {
-    if (!setting('support_overlay')) return ['on' => 0];
+    if (!support_on($d)) return ['on' => 0];
     $st = db()->prepare("SELECT MAX(CASE WHEN sender<>'agent' THEN id END) last,
         MAX(kind='emergency' AND ack_at IS NULL) open, MAX(kind='emergency' AND ack_at >= NOW() - INTERVAL " . SUPPORT_ACK_SHOW . " SECOND) ack
         FROM support_msgs WHERE device_id=?");

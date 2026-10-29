@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -262,6 +262,7 @@ def collect():
         "winupdate_state": _pol_state().get("winupdate", ""),
         "policy_err": _pol["err"],
         **({"update_result": _upd["result"]} if _upd["result"] else {}),
+        "support_ui": support_ui_state(),
         **({"support_err": _sup["err"]} if _sup["err"] else {}),
     }
 
@@ -1127,6 +1128,8 @@ def run_command(cmd):
         return go_sleep()
     if t == "WAKE":
         return wake(payload)
+    if t == "SUPPORT_SHOW":
+        return support_show(payload == "chat")
     raise RuntimeError("perintah tidak dikenal: " + t)
 
 
@@ -1151,6 +1154,8 @@ _sup_lock = threading.Lock()
 _sup_out = collections.deque()                # kiriman yang belum diterima server
 _sup_wake = threading.Event()
 _sup_hwnd = [None]                            # jendela tombol (untuk membangunkan thread UI dari thread lain)
+_sup_ui_thread = [None, 0.0]                  # thread tombol + waktu terakhir dijalankan
+_sup_keep = []                                # objek UI lama tetap disimpan: callback jendelanya tidak boleh dibuang GC
 
 
 def _sup_load():
@@ -1260,18 +1265,64 @@ def support_sync(s):
     if on and not _sup["started"]:
         _sup["started"] = True
         threading.Thread(target=sup_worker, daemon=True).start()
-        threading.Thread(target=_sup_ui_main, daemon=True).start()
+    if on:
+        _sup_ensure_ui()
     if _sup["last"] > _sup["max"]:
         _sup_wake.set()
     _sup_post()
 
 
+def _sup_ensure_ui(force=False):
+    """Jalankan (ulang) tombol bila belum ada atau berhenti karena error. Dicoba lagi paling cepat tiap 60 detik,
+    langsung bila diminta dari server (menu Support -> Tampilkan di layar)."""
+    t = _sup_ui_thread[0]
+    if t and t.is_alive():
+        return
+    if not force and time.time() - _sup_ui_thread[1] < 60:
+        return
+    _sup_ui_thread[1] = time.time()
+    _sup_ui_thread[0] = threading.Thread(target=_sup_ui_main, daemon=True)
+    _sup_ui_thread[0].start()
+
+
 def _sup_ui_main():
+    ui = SupportUI()
+    _sup_keep.append(ui)
     try:
-        SupportUI().run()
+        ui.run()
     except Exception as e:
         _sup["err"] = str(e)[:200]
         log.exception("tombol support gagal tampil")
+    finally:
+        _sup_hwnd[0] = None
+
+
+def support_ui_state():
+    """Dilaporkan ke server (menu Support): shown / off / starting / error:..."""
+    if not _sup["on"]:
+        return "off"
+    t = _sup_ui_thread[0]
+    if _sup["err"] and not (t and t.is_alive()):
+        return "error:" + _sup["err"]
+    h = _sup_hwnd[0]
+    return "shown" if h and ctypes.windll.user32.IsWindowVisible(h) else "starting"
+
+
+def support_show(chat):
+    """Perintah SUPPORT_SHOW dari server: munculkan lagi tombol (dan buka jendela chat)."""
+    if not IS_WIN:
+        raise RuntimeError("hanya untuk Windows")
+    if not _sup["on"]:
+        raise RuntimeError("tombol support sedang dinonaktifkan untuk laptop ini")
+    _sup_ensure_ui(force=True)
+    for _ in range(50):
+        if _sup_hwnd[0]:
+            break
+        time.sleep(0.1)
+    if not _sup_hwnd[0]:
+        raise RuntimeError("tombol gagal tampil: " + (_sup["err"] or "belum siap"))
+    ctypes.windll.user32.PostMessageW(_sup_hwnd[0], 0x8002 if chat else 0x8001, 0, 0)
+    return "tombol support tampil" + (", jendela chat dibuka" if chat else "")
 
 
 class SupportUI:
@@ -1310,7 +1361,8 @@ class SupportUI:
             ("SetWindowTextW", [W.HWND, W.LPCWSTR], W.BOOL), ("GetWindowTextW", [W.HWND, W.LPWSTR, I], I), ("GetWindowTextLengthW", [W.HWND], I),
             ("SetForegroundWindow", [W.HWND], W.BOOL), ("SetFocus", [W.HWND], W.HWND), ("MessageBeep", [W.UINT], W.BOOL),
             ("GetDlgItem", [W.HWND, I], W.HWND), ("SystemParametersInfoW", [W.UINT, W.UINT, W.LPVOID, W.UINT], W.BOOL),
-            ("AdjustWindowRectEx", [P(W.RECT), W.DWORD, W.BOOL, W.DWORD], W.BOOL)]:
+            ("AdjustWindowRectEx", [P(W.RECT), W.DWORD, W.BOOL, W.DWORD], W.BOOL),
+            ("UnregisterClassW", [W.LPCWSTR, W.HINSTANCE], W.BOOL), ("RegisterHotKey", [W.HWND, I, W.UINT, W.UINT], W.BOOL)]:
             f = getattr(u, fn)
             f.argtypes, f.restype = args, res
         for fn, args, res in [
@@ -1373,6 +1425,7 @@ class SupportUI:
         return 0, 0, 1366, 728
 
     def register(self, name, proc, cursor):
+        self.u.UnregisterClassW(name, self.hinst)          # tombol dijalankan ulang: kelas lama memakai callback lama
         wc = self.WNDCLASSEXW(cbSize=ctypes.sizeof(self.WNDCLASSEXW), style=0, lpfnWndProc=proc, hInstance=self.hinst,
                               hCursor=self.u.LoadCursorW(None, ctypes.c_void_p(cursor)),
                               hbrBackground=self.W.HBRUSH(16), lpszClassName=name)   # COLOR_BTNFACE + 1
@@ -1396,6 +1449,10 @@ class SupportUI:
         self.make_chat()
         _sup_hwnd[0] = self.bar
         u.SetTimer(self.bar, 1, 500, None)
+        # Ctrl+Alt+S: buka/tutup jendela chat (juga memunculkan tombol), berlaku di mana saja
+        if not u.RegisterHotKey(self.bar, 1, 0x1 | 0x2 | 0x4000, 0x53):       # MOD_ALT | MOD_CONTROL | MOD_NOREPEAT, "S"
+            log.info("support: shortcut Ctrl+Alt+S sudah dipakai program lain")
+        _sup["err"] = ""
         self.refresh()
         msg = self.W.MSG()
         while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
@@ -1584,6 +1641,17 @@ class SupportUI:
             if msg == 0x8001:                                                    # WM_APP+1 dari thread lain
                 self.refresh()
                 return 0
+            if msg == 0x8002:                                                    # WM_APP+2: server minta jendela chat dibuka
+                if _sup["on"]:
+                    if _sup["visible"]:
+                        self.u.SetForegroundWindow(self.chat)
+                    else:
+                        self.toggle_chat()
+                return 0
+            if msg == 0x312:                                                     # WM_HOTKEY Ctrl+Alt+S
+                if _sup["on"]:
+                    self.toggle_chat()
+                return 0
             if msg == 0x10:                                                      # WM_CLOSE: tombol tidak bisa ditutup
                 return 0
         except Exception:
@@ -1655,6 +1723,8 @@ def main():
                     gate_urls = [str(u) for u in j["gate_urls"] if str(u).startswith(("http://", "https://"))][:4]
                 if j.get("gate_url"):
                     gate_url = j["gate_url"]
+                if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
+                    support_sync(j["support"])
                 for cmd in j.get("commands", []):
                     log.info("perintah #%s %s", cmd["id"], cmd["type"])
                     if cmd["type"] == "UPDATE_AGENT":            # hasil dilaporkan thread update sendiri
@@ -1670,8 +1740,6 @@ def main():
                     wallpaper_sync(j["wallpaper"])
                 if "policy" in j:                                # daya & Windows Update (server lama tidak mengirim)
                     policy_sync(j["policy"])
-                if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
-                    support_sync(j["support"])
             if _upd["restart"]:
                 restart_for_update()                             # hasil update sudah dilaporkan; penjaga mengambil alih
         except Exception as e:

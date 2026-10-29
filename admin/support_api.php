@@ -3,14 +3,14 @@
 // GET  act=alert                 -> darurat yang belum ditangani + jumlah pesan belum dibaca (dipolling semua halaman admin)
 // GET  act=convs                 -> daftar percakapan per laptop
 // GET  act=thread&dev=ID&since=  -> pesan baru satu laptop (pesan dari laptop ditandai dibaca)
-// POST act=send (dev, text) / act=ack (dev)   -> supervisor + CSRF
+// POST act=send (dev, text) / act=ack (dev) / act=mode (dev, mode) / act=show (dev, chat) / act=show_all   -> supervisor + CSRF
 require __DIR__ . '/auth.php';
 if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
 $pdo = db();
 $act = $_REQUEST['act'] ?? '';
 
 function sup_device($id) {
-    $st = db()->prepare("SELECT d.id, d.name, d.device_key, d.gate, d.ip, d.mode, d.last_seen, d.agent_version, c.name AS category_name, c.color AS category_color
+    $st = db()->prepare("SELECT d.id, d.name, d.device_key, d.gate, d.ip, d.mode, d.last_seen, d.agent_version, d.support_overlay, d.support_state, c.name AS category_name, c.color AS category_color
         FROM devices d LEFT JOIN categories c ON c.id=d.category_id WHERE d.id=?");
     $st->execute([(int)$id]);
     $d = $st->fetch();
@@ -18,14 +18,47 @@ function sup_device($id) {
     $d['id'] = (int)$d['id'];
     $d['state'] = $d['last_seen'] && time() - strtotime($d['last_seen']) <= setting('offline_after') ? 'online' : 'offline';
     $d['supported'] = $d['agent_version'] !== null && version_compare($d['agent_version'], SUPPORT_MIN, '>=');
+    $d['can_show'] = $d['agent_version'] !== null && version_compare($d['agent_version'], SUPPORT_SHOW_MIN, '>=');
+    $d['support_on'] = support_on($d);
+    $d['support_overlay'] = $d['support_overlay'] === null ? '' : (string)$d['support_overlay'];
     return $d;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_supervisor_json();
     check_csrf();
-    $d = sup_device($_POST['dev'] ?? 0);
     $who = current_user()['username'];
+    $cmd = $pdo->prepare("INSERT INTO commands (device_id, type, payload, status, created_by, created_at) VALUES (?, 'SUPPORT_SHOW', ?, 'pending', ?, NOW())");
+    // tampilkan ulang tombol di semua laptop yang tombolnya aktif (agent 1.12+); yang sengaja disembunyikan dilewati
+    if ($act === 'show_all') {
+        $n = 0; $old = 0;
+        foreach ($pdo->query("SELECT id, agent_version, support_overlay FROM devices") as $r) {
+            if (!support_on($r)) continue;
+            if (!$r['agent_version'] || version_compare($r['agent_version'], SUPPORT_SHOW_MIN, '<')) { $old++; continue; }
+            $cmd->execute([$r['id'], '', $who]);
+            $n++;
+        }
+        log_event(null, 'info', "$who menampilkan ulang tombol support di $n laptop");
+        json_out(['ok' => true, 'count' => $n, 'old' => $old]);
+    }
+    $d = sup_device($_POST['dev'] ?? 0);
+    // tombol di laptop ini: ikut Pengaturan / selalu tampil / sembunyikan
+    if ($act === 'mode') {
+        $m = (string)($_POST['mode'] ?? '');
+        if (!isset(SUPPORT_MODES[$m])) json_out(['ok' => false, 'error' => 'pilihan tidak valid'], 400);
+        $pdo->prepare("UPDATE devices SET support_overlay=? WHERE id=?")->execute([$m === '' ? null : (int)$m, $d['id']]);
+        log_event($d['id'], 'info', "$who mengatur tombol support {$d['name']}: " . SUPPORT_MODES[$m]);
+        json_out(['ok' => true]);
+    }
+    // tampilkan tombol (dan buka jendela chat) di layar laptop; bila sedang disembunyikan, laptop ini diatur "Selalu tampil"
+    if ($act === 'show') {
+        if (!$d['can_show']) json_out(['ok' => false, 'error' => 'perlu agent ' . SUPPORT_SHOW_MIN . '+ (laptop ini ' . ($d['agent_version'] ?: '?') . '), update lewat menu Agent'], 400);
+        $chat = !empty($_POST['chat']);
+        if (!$d['support_on']) $pdo->prepare("UPDATE devices SET support_overlay=1 WHERE id=?")->execute([$d['id']]);
+        $cmd->execute([$d['id'], $chat ? 'chat' : '', $who]);
+        log_event($d['id'], 'info', "$who menampilkan tombol support" . ($chat ? ' + jendela chat' : '') . " di {$d['name']}");
+        json_out(['ok' => true, 'forced' => !$d['support_on']]);
+    }
     if ($act === 'send') {
         $text = support_text($_POST['text'] ?? '');
         if ($text === '') json_out(['ok' => false, 'error' => 'pesan kosong'], 400);
@@ -98,7 +131,11 @@ if ($act === 'thread') {
     $seen = (int)$st->fetchColumn();
     $st = $pdo->prepare("SELECT MIN(created_at) FROM support_msgs WHERE device_id=? AND kind='emergency' AND ack_at IS NULL");
     $st->execute([$d['id']]);
+    $emg_open = $st->fetchColumn() ?: null;
+    $st = $pdo->prepare("SELECT status, LEFT(result, 200) result, created_at FROM commands WHERE device_id=? AND type='SUPPORT_SHOW' ORDER BY id DESC LIMIT 1");
+    $st->execute([$d['id']]);
     unset($d['last_seen']);
-    json_out(['ok' => true, 'device' => $d, 'msgs' => $msgs, 'seen_upto' => $seen, 'emg_open' => $st->fetchColumn() ?: null]);
+    json_out(['ok' => true, 'device' => $d, 'msgs' => $msgs, 'seen_upto' => $seen, 'emg_open' => $emg_open, 'show_cmd' => $st->fetch() ?: null,
+        'global_on' => (bool)setting('support_overlay')]);
 }
 json_out(['ok' => false, 'error' => 'aksi tidak dikenal'], 400);
