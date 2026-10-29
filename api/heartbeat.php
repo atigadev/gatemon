@@ -133,6 +133,13 @@ if (!empty($b['scans']) && is_array($b['scans'])) {
     }
 }
 
+// Tombol Chat Support / DARURAT gagal tampil di laptop (agent >= 1.11); dicatat paling sering 1 jam sekali
+if (!empty($b['support_err'])) {
+    $st = $pdo->prepare("SELECT COUNT(*) FROM logs WHERE device_id=? AND message LIKE '%tombol support gagal%' AND created_at > NOW() - INTERVAL 1 HOUR");
+    $st->execute([$d['id']]);
+    if (!$st->fetchColumn()) log_event($d['id'], 'warn', "{$d['name']}: tombol support gagal tampil (" . mb_substr((string)$b['support_err'], 0, 200) . ")");
+}
+
 // Ambil perintah yang menunggu dan tandai sebagai terkirim
 $st = $pdo->prepare("SELECT id, type, payload FROM commands WHERE device_id=? AND status='pending' ORDER BY id");
 $st->execute([$d['id']]);
@@ -149,7 +156,7 @@ $gate_url = $gate_urls ? $gate_urls[0] : '';
 $w = wallpaper_for($d);
 $wc = wallpaper_cfg();
 $wallpaper = $w ? ['sha' => $w['sha256'], 'ext' => $w['ext'], 'bytes' => (int)$w['bytes'], 'style' => $wc['style'], 'lock' => $wc['lock']] : null;
-json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
+json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'support' => support_hb($d), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
     'auto_open' => setting('auto_open_gate'), 'auto_reopen' => setting('auto_reopen_gate'), 'reopen_after' => setting('reopen_after'),
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),

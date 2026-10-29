@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -262,6 +262,7 @@ def collect():
         "winupdate_state": _pol_state().get("winupdate", ""),
         "policy_err": _pol["err"],
         **({"update_result": _upd["result"]} if _upd["result"] else {}),
+        **({"support_err": _sup["err"]} if _sup["err"] else {}),
     }
 
 
@@ -1137,6 +1138,479 @@ def report(cmd_id, status, result):
         log.error("gagal lapor hasil #%s: %s", cmd_id, e)
 
 
+# ---------- chat support & tombol DARURAT (agent >= 1.11) ----------
+# Dua tombol kecil selalu di atas, pojok kanan bawah layar: "Chat Support" membuka jendela chat dengan tim support
+# (menu Support di server), "DARURAT" langsung mengirim tanda darurat yang membunyikan alarm di halaman admin.
+# Win32 murni lewat ctypes (tanpa tkinter). Tombol tidak mengambil fokus keyboard: scanner barcode di halaman gate
+# tetap mengetik ke browser walau tombol diklik. Pesan yang gagal terkirim (jaringan putus) dikirim ulang terus.
+SUP_STATE = os.path.join(BASE, "support-state.json")
+SUP = requests.Session()                      # sesi sendiri: thread support tidak berbagi koneksi dengan heartbeat
+SUP.headers.update(HEADERS)
+_sup = {"on": False, "last": 0, "max": 0, "seen": 0, "emg": "", "msgs": [], "status": "", "err": "", "started": False, "visible": False}
+_sup_lock = threading.Lock()
+_sup_out = collections.deque()                # kiriman yang belum diterima server
+_sup_wake = threading.Event()
+_sup_hwnd = [None]                            # jendela tombol (untuk membangunkan thread UI dari thread lain)
+
+
+def _sup_load():
+    try:
+        with open(SUP_STATE, encoding="utf-8") as f:
+            _sup["seen"] = int(json.load(f).get("seen", 0))
+    except Exception:
+        pass
+
+
+def _sup_save():
+    try:
+        with open(SUP_STATE, "w", encoding="utf-8") as f:
+            json.dump({"seen": _sup["seen"]}, f)
+    except Exception as e:
+        log.debug("support-state: %s", e)
+
+
+def _sup_post():
+    if _sup_hwnd[0]:
+        ctypes.windll.user32.PostMessageW(_sup_hwnd[0], 0x8001, 0, 0)   # WM_APP+1: gambar ulang
+
+
+def sup_unread():
+    return sum(1 for m in _sup["msgs"] if m["sender"] != "agent" and m["id"] > _sup["seen"])
+
+
+def sup_send(kind, text=""):
+    cid = "%x%s" % (int(time.time() * 1000), os.urandom(4).hex())
+    with _sup_lock:
+        _sup_out.append({"kind": kind, "text": text, "cid": cid, "user": os.environ.get("USERNAME", "")})
+        if kind == "emergency":
+            _sup["emg"] = "sending"
+        _sup["status"] = "Mengirim…"
+    _sup_wake.set()
+    _sup_post()
+
+
+def sup_worker():
+    _sup_load()
+    first = True
+    while True:
+        _sup_wake.wait(3 if _sup["visible"] or _sup_out else 20)
+        _sup_wake.clear()
+        if not _sup["on"]:
+            first = True
+            continue
+        try:
+            while _sup_out:
+                m = _sup_out[0]
+                r = SUP.post(f"{SERVER}/api/support.php", json=m, timeout=10)
+                try:
+                    j = r.json()
+                except ValueError:
+                    j = {}
+                if r.status_code == 200 and j.get("ok"):
+                    with _sup_lock:
+                        _sup_out.popleft()
+                        if m["kind"] == "emergency":
+                            _sup["emg"] = "open"
+                        _sup["status"] = "Darurat terkirim, support segera datang" if m["kind"] == "emergency" else "Terkirim"
+                    _sup_wake.set()                              # ambil pesan yang baru tersimpan
+                elif r.status_code == 429:                       # terlalu cepat: dicoba lagi nanti
+                    _sup["status"] = j.get("error") or "Tunggu sebentar"
+                    break
+                elif r.status_code in (400, 403):                # ditolak server: tidak dikirim ulang
+                    with _sup_lock:
+                        _sup_out.popleft()
+                        if m["kind"] == "emergency":
+                            _sup["emg"] = ""
+                        _sup["status"] = "Gagal: " + str(j.get("error") or r.status_code)
+                else:
+                    raise RuntimeError("HTTP %s" % r.status_code)
+            show = _sup["visible"]
+            if first or show or _sup["last"] > _sup["max"]:
+                r = SUP.get(f"{SERVER}/api/support.php", params={"since": _sup["max"], "read": 1 if show else 0}, timeout=10)
+                j = r.json()
+                if j.get("ok"):
+                    with _sup_lock:
+                        for m in j.get("msgs") or []:
+                            if int(m["id"]) > _sup["max"]:
+                                _sup["msgs"].append(m)
+                                _sup["max"] = int(m["id"])
+                        del _sup["msgs"][:-200]
+                        if _sup["emg"] != "sending":
+                            _sup["emg"] = str(j.get("emg") or "")
+                        if show and _sup["seen"] < _sup["max"]:
+                            _sup["seen"] = _sup["max"]
+                            _sup_save()
+                    first = False
+            if _sup["status"].startswith("Tidak terhubung"):
+                _sup["status"] = ""
+        except Exception as e:
+            _sup["status"] = "Tidak terhubung ke server, dicoba lagi…"
+            log.debug("support: %s", e)
+        _sup_post()
+
+
+def support_sync(s):
+    """Dari balasan heartbeat: aktif/tidak (menu Pengaturan), id pesan support terakhir, status darurat."""
+    on = bool(s.get("on")) and IS_WIN
+    with _sup_lock:
+        _sup["last"] = int(s.get("last") or 0)
+        if on and _sup["emg"] != "sending":
+            _sup["emg"] = str(s.get("emg") or "")
+    _sup["on"] = on
+    if on and not _sup["started"]:
+        _sup["started"] = True
+        threading.Thread(target=sup_worker, daemon=True).start()
+        threading.Thread(target=_sup_ui_main, daemon=True).start()
+    if _sup["last"] > _sup["max"]:
+        _sup_wake.set()
+    _sup_post()
+
+
+def _sup_ui_main():
+    try:
+        SupportUI().run()
+    except Exception as e:
+        _sup["err"] = str(e)[:200]
+        log.exception("tombol support gagal tampil")
+
+
+class SupportUI:
+    BAR_W, CHAT_W, SOS_W, GAP, BAR_H, MARGIN = 150, 150, 124, 8, 40, 14
+    KEY = 0xFF00FF                                     # warna transparan di sekitar tombol (COLORREF 0x00BBGGRR)
+    C = {"blue": 0xEB6325, "amber": 0x0B9EF5, "amber2": 0x0677D9, "red": 0x2626DC, "red2": 0x1C1C99, "green": 0x4AA316}
+    ID_SEND, ID_CANCEL, ID_LOG, ID_INPUT, ID_STATUS = 1, 2, 10, 11, 12
+
+    def __init__(self):
+        import ctypes.wintypes as W
+        self.W = W
+        u = self.u = ctypes.WinDLL("user32", use_last_error=True)   # salinan sendiri: argtypes tidak mengubah ctypes.windll
+        g = self.g = ctypes.WinDLL("gdi32")
+        k = self.k = ctypes.WinDLL("kernel32", use_last_error=True)
+        P, I, LR = ctypes.POINTER, ctypes.c_int, ctypes.c_ssize_t
+        self.WNDPROC = ctypes.WINFUNCTYPE(LR, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
+
+        class WNDCLASSEXW(ctypes.Structure):
+            _fields_ = [("cbSize", W.UINT), ("style", W.UINT), ("lpfnWndProc", self.WNDPROC), ("cbClsExtra", I), ("cbWndExtra", I),
+                        ("hInstance", W.HINSTANCE), ("hIcon", W.HICON), ("hCursor", W.HANDLE), ("hbrBackground", W.HBRUSH),
+                        ("lpszMenuName", W.LPCWSTR), ("lpszClassName", W.LPCWSTR), ("hIconSm", W.HICON)]
+
+        class PAINTSTRUCT(ctypes.Structure):
+            _fields_ = [("hdc", W.HDC), ("fErase", W.BOOL), ("rcPaint", W.RECT), ("fRestore", W.BOOL), ("fIncUpdate", W.BOOL), ("rgb", ctypes.c_byte * 32)]
+        self.WNDCLASSEXW, self.PAINTSTRUCT = WNDCLASSEXW, PAINTSTRUCT
+        for fn, args, res in [
+            ("DefWindowProcW", [W.HWND, W.UINT, W.WPARAM, W.LPARAM], LR), ("RegisterClassExW", [P(WNDCLASSEXW)], W.ATOM),
+            ("CreateWindowExW", [W.DWORD, W.LPCWSTR, W.LPCWSTR, W.DWORD, I, I, I, I, W.HWND, W.HMENU, W.HINSTANCE, W.LPVOID], W.HWND),
+            ("SendMessageW", [W.HWND, W.UINT, W.WPARAM, W.LPARAM], LR), ("SetWindowPos", [W.HWND, W.HWND, I, I, I, I, W.UINT], W.BOOL),
+            ("ShowWindow", [W.HWND, I], W.BOOL), ("IsWindowVisible", [W.HWND], W.BOOL), ("BeginPaint", [W.HWND, P(PAINTSTRUCT)], W.HDC),
+            ("EndPaint", [W.HWND, P(PAINTSTRUCT)], W.BOOL), ("FillRect", [W.HDC, P(W.RECT), W.HBRUSH], I),
+            ("DrawTextW", [W.HDC, W.LPCWSTR, I, P(W.RECT), W.UINT], I), ("InvalidateRect", [W.HWND, P(W.RECT), W.BOOL], W.BOOL),
+            ("SetLayeredWindowAttributes", [W.HWND, W.COLORREF, W.BYTE, W.DWORD], W.BOOL), ("GetMessageW", [P(W.MSG), W.HWND, W.UINT, W.UINT], W.BOOL),
+            ("IsDialogMessageW", [W.HWND, P(W.MSG)], W.BOOL), ("TranslateMessage", [P(W.MSG)], W.BOOL), ("DispatchMessageW", [P(W.MSG)], LR),
+            ("SetTimer", [W.HWND, ctypes.c_size_t, W.UINT, W.LPVOID], ctypes.c_size_t), ("LoadCursorW", [W.HINSTANCE, W.LPVOID], W.HANDLE),
+            ("SetWindowTextW", [W.HWND, W.LPCWSTR], W.BOOL), ("GetWindowTextW", [W.HWND, W.LPWSTR, I], I), ("GetWindowTextLengthW", [W.HWND], I),
+            ("SetForegroundWindow", [W.HWND], W.BOOL), ("SetFocus", [W.HWND], W.HWND), ("MessageBeep", [W.UINT], W.BOOL),
+            ("GetDlgItem", [W.HWND, I], W.HWND), ("SystemParametersInfoW", [W.UINT, W.UINT, W.LPVOID, W.UINT], W.BOOL),
+            ("AdjustWindowRectEx", [P(W.RECT), W.DWORD, W.BOOL, W.DWORD], W.BOOL)]:
+            f = getattr(u, fn)
+            f.argtypes, f.restype = args, res
+        for fn, args, res in [
+            ("CreateSolidBrush", [W.COLORREF], W.HBRUSH), ("CreatePen", [I, I, W.COLORREF], W.HPEN), ("SelectObject", [W.HDC, W.HGDIOBJ], W.HGDIOBJ),
+            ("DeleteObject", [W.HGDIOBJ], W.BOOL), ("RoundRect", [W.HDC, I, I, I, I, I, I], W.BOOL), ("SetBkMode", [W.HDC, I], I),
+            ("SetTextColor", [W.HDC, W.COLORREF], W.COLORREF), ("SetBkColor", [W.HDC, W.COLORREF], W.COLORREF), ("GetStockObject", [I], W.HGDIOBJ),
+            ("CreateFontW", [I, I, I, I, I, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR], W.HFONT)]:
+            f = getattr(g, fn)
+            f.argtypes, f.restype = args, res
+        k.GetModuleHandleW.argtypes, k.GetModuleHandleW.restype = [W.LPCWSTR], W.HMODULE
+        self.hinst = k.GetModuleHandleW(None)
+        self.blink = False
+        self.tick = 0
+        self.beeped = _sup["seen"]
+        self.bar = self.chat = None
+        self.log_text = None
+        self.last_pos = None
+
+    # ---------- persiapan: DPI, gaya kontrol Windows modern ----------
+    def _setup(self):
+        u, W = self.u, self.W
+        self.dpi = 96
+        try:   # hanya thread ini yang DPI-aware (tajam di layar 125-150%); thread lain (layout jendela browser) tidak berubah
+            u.SetThreadDpiAwarenessContext.argtypes, u.SetThreadDpiAwarenessContext.restype = [W.LPVOID], W.LPVOID
+            u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-2))   # DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
+            self.dpi = u.GetDpiForSystem() or 96
+        except Exception:
+            pass
+        try:   # kontrol versi 6 (tombol & kotak isian bergaya Windows 10/11, teks petunjuk di kotak isian)
+            man = os.path.join(BASE, "support-ui.manifest")
+            if not os.path.exists(man):
+                with open(man, "w", encoding="utf-8") as f:
+                    f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">'
+                            '<dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" '
+                            'processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency></assembly>')
+
+            class ACTCTXW(ctypes.Structure):
+                _fields_ = [("cbSize", W.ULONG), ("dwFlags", W.DWORD), ("lpSource", W.LPCWSTR), ("wProcessorArchitecture", W.USHORT),
+                            ("wLangId", W.LANGID), ("lpAssemblyDirectory", W.LPCWSTR), ("lpResourceName", W.LPCWSTR),
+                            ("lpApplicationName", W.LPCWSTR), ("hModule", W.HMODULE)]
+            ac = ACTCTXW(cbSize=ctypes.sizeof(ACTCTXW), lpSource=man)
+            self.k.CreateActCtxW.argtypes, self.k.CreateActCtxW.restype = [ctypes.POINTER(ACTCTXW)], W.HANDLE
+            self.k.ActivateActCtx.argtypes = [W.HANDLE, ctypes.POINTER(ctypes.c_size_t)]
+            h = self.k.CreateActCtxW(ctypes.byref(ac))
+            if h and h != W.HANDLE(-1).value:
+                self.k.ActivateActCtx(h, ctypes.byref(ctypes.c_size_t()))
+        except Exception as e:
+            log.debug("support: gaya kontrol: %s", e)
+
+    def s(self, v):
+        return int(round(v * self.dpi / 96))
+
+    def font(self, pt, bold=False):
+        return self.g.CreateFontW(-int(round(pt * self.dpi / 72)), 0, 0, 0, 700 if bold else 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI")
+
+    def work_area(self):
+        r = self.W.RECT()
+        if self.u.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0):
+            return r.left, r.top, r.right, r.bottom
+        return 0, 0, 1366, 728
+
+    def register(self, name, proc, cursor):
+        wc = self.WNDCLASSEXW(cbSize=ctypes.sizeof(self.WNDCLASSEXW), style=0, lpfnWndProc=proc, hInstance=self.hinst,
+                              hCursor=self.u.LoadCursorW(None, ctypes.c_void_p(cursor)),
+                              hbrBackground=self.W.HBRUSH(16), lpszClassName=name)   # COLOR_BTNFACE + 1
+        if not self.u.RegisterClassExW(ctypes.byref(wc)) and ctypes.get_last_error() != 1410:   # 1410 = kelas sudah ada
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def run(self):
+        u = self.u
+        self._setup()
+        self.f_bar, self.f_ui = self.font(10, True), self.font(10)
+        self._bar_proc, self._chat_proc = self.WNDPROC(self.bar_proc), self.WNDPROC(self.chat_proc)   # disimpan: jangan sampai dibuang GC
+        self.register("GateMonSupportBar", self._bar_proc, 32649)     # IDC_HAND
+        self.register("GateMonSupportChat", self._chat_proc, 32512)   # IDC_ARROW
+        bw, bh = self.s(self.CHAT_W + self.GAP + self.SOS_W), self.s(self.BAR_H)
+        # WS_EX_TOPMOST | TOOLWINDOW (tanpa ikon taskbar) | NOACTIVATE (tidak mengambil fokus) | LAYERED (sudut transparan)
+        self.bar = u.CreateWindowExW(0x8 | 0x80 | 0x08000000 | 0x80000, "GateMonSupportBar", "GateMon Support", 0x80000000,
+                                     0, 0, bw, bh, None, None, self.hinst, None)
+        if not self.bar:
+            raise ctypes.WinError(ctypes.get_last_error())
+        u.SetLayeredWindowAttributes(self.bar, self.KEY, 235, 0x1 | 0x2)   # LWA_COLORKEY | LWA_ALPHA
+        self.make_chat()
+        _sup_hwnd[0] = self.bar
+        u.SetTimer(self.bar, 1, 500, None)
+        self.refresh()
+        msg = self.W.MSG()
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if self.chat and u.IsDialogMessageW(self.chat, ctypes.byref(msg)):   # Enter = kirim, Esc = tutup, Tab
+                continue
+            u.TranslateMessage(ctypes.byref(msg))
+            u.DispatchMessageW(ctypes.byref(msg))
+
+    def make_chat(self):
+        u, s = self.u, self.s
+        cw, ch = s(380), s(470)
+        style, ex = 0x00C00000 | 0x00080000 | 0x00020000, 0x8   # CAPTION | SYSMENU | MINIMIZEBOX, TOPMOST
+        r = self.W.RECT(0, 0, cw, ch)
+        u.AdjustWindowRectEx(ctypes.byref(r), style, False, ex)
+        self.chat_size = (r.right - r.left, r.bottom - r.top)
+        self.chat = u.CreateWindowExW(ex, "GateMonSupportChat", "Chat Tim Support - " + socket.gethostname(), style,
+                                      0, 0, self.chat_size[0], self.chat_size[1], None, None, self.hinst, None)
+        p, m = s(10), s(8)
+        mk = lambda cls, text, st, exs, x, y, w, h, cid: u.CreateWindowExW(exs, cls, text, 0x40000000 | 0x10000000 | st, x, y, w, h,
+                                                                          self.chat, self.W.HMENU(cid), self.hinst, None)
+        self.h_log = mk("EDIT", "", 0x00200000 | 0x4 | 0x800 | 0x40, 0x200, p, p, cw - 2 * p, ch - s(100), self.ID_LOG)   # VSCROLL MULTILINE READONLY AUTOVSCROLL
+        self.h_status = mk("STATIC", "", 0, 0, p, ch - s(86), cw - 2 * p, s(20), self.ID_STATUS)
+        self.h_input = mk("EDIT", "", 0x00010000 | 0x80, 0x200, p, ch - s(60), cw - 2 * p - s(90) - m, s(30), self.ID_INPUT)   # TABSTOP AUTOHSCROLL
+        self.h_send = mk("BUTTON", "Kirim", 0x00010000 | 0x1, 0, cw - p - s(90), ch - s(60), s(90), s(30), self.ID_SEND)  # DEFPUSHBUTTON
+        mk("STATIC", "Enter = kirim  ·  Esc = tutup  ·  Darurat: tombol merah", 0, 0, p, ch - s(24), cw - 2 * p, s(18), 13)
+        for h in (self.h_log, self.h_status, self.h_input, self.h_send, u.GetDlgItem(self.chat, 13)):
+            u.SendMessageW(h, 0x30, self.f_ui or 0, 1)                           # WM_SETFONT
+        u.SendMessageW(self.h_input, 0xC5, 500, 0)                               # EM_SETLIMITTEXT
+        cue = ctypes.create_unicode_buffer("Tulis pesan untuk Tim Support…")
+        self._cue = cue
+        u.SendMessageW(self.h_input, 0x1501, 1, ctypes.addressof(cue))           # EM_SETCUEBANNER
+
+    # ---------- tampilan ----------
+    def buttons(self):
+        n = sup_unread()
+        if n:
+            chat = ("Pesan baru (%d)" % n, self.C["amber"] if self.blink else self.C["amber2"])
+        else:
+            chat = ("Chat Support", self.C["blue"])
+        e = _sup["emg"]
+        sos = {"sending": ("MENGIRIM…", self.C["red2"] if self.blink else self.C["red"]),
+               "open": ("TERKIRIM ✓", self.C["red"] if self.blink else self.C["red2"]),
+               "ack": ("DITANGANI ✓", self.C["green"])}.get(e, ("DARURAT", self.C["red"]))
+        s = self.s
+        return [(0, s(self.CHAT_W)) + chat, (s(self.CHAT_W + self.GAP), s(self.CHAT_W + self.GAP + self.SOS_W)) + sos]
+
+    def paint_bar(self, hwnd):
+        u, g = self.u, self.g
+        ps = self.PAINTSTRUCT()
+        hdc = u.BeginPaint(hwnd, ctypes.byref(ps))
+        h = self.s(self.BAR_H)
+        full = self.W.RECT(0, 0, self.s(self.CHAT_W + self.GAP + self.SOS_W), h)
+        key = g.CreateSolidBrush(self.KEY)
+        u.FillRect(hdc, ctypes.byref(full), key)
+        g.DeleteObject(key)
+        g.SetBkMode(hdc, 1)                                                      # TRANSPARENT
+        g.SetTextColor(hdc, 0xFFFFFF)
+        old_font = g.SelectObject(hdc, self.f_bar)
+        for x1, x2, text, color in self.buttons():
+            br, pen = g.CreateSolidBrush(color), g.CreatePen(0, 1, color)
+            ob, op = g.SelectObject(hdc, br), g.SelectObject(hdc, pen)
+            g.RoundRect(hdc, x1, 0, x2, h, h, h)
+            g.SelectObject(hdc, ob), g.SelectObject(hdc, op)
+            g.DeleteObject(br), g.DeleteObject(pen)
+            r = self.W.RECT(x1, 0, x2, h)
+            u.DrawTextW(hdc, text, -1, ctypes.byref(r), 0x1 | 0x4 | 0x20)       # CENTER | VCENTER | SINGLELINE
+        g.SelectObject(hdc, old_font)
+        u.EndPaint(hwnd, ctypes.byref(ps))
+
+    def place(self, force=False):
+        u, s = self.u, self.s
+        l, t, r, b = self.work_area()
+        bw, bh = s(self.CHAT_W + self.GAP + self.SOS_W), s(self.BAR_H)
+        x, y = r - bw - s(self.MARGIN), b - bh - s(self.MARGIN)
+        u.SetWindowPos(self.bar, self.W.HWND(-1), x, y, bw, bh, 0x10 | 0x40)    # HWND_TOPMOST, NOACTIVATE | SHOWWINDOW
+        if force or self.last_pos != (x, y):
+            self.last_pos = (x, y)
+            cw, chh = self.chat_size
+            u.SetWindowPos(self.chat, self.W.HWND(-1), max(l, r - cw - s(self.MARGIN)), max(t, y - chh - s(8)), 0, 0, 0x1 | 0x10)  # NOSIZE | NOACTIVATE
+
+    def transcript(self):
+        with _sup_lock:
+            msgs, pend = list(_sup["msgs"]), [m for m in _sup_out if m["kind"] == "chat"]
+        out = []
+        for m in msgs:
+            who = {"agent": "Anda", "system": "Info"}.get(m["sender"], "Support" + (" (%s)" % m["author"] if m.get("author") else ""))
+            body = str(m.get("body", ""))
+            if m.get("kind") == "emergency" and not body.upper().startswith("DARURAT"):
+                body = "[DARURAT] " + body
+            out.append("%s  %s:\r\n%s" % (str(m.get("created_at", ""))[11:16], who, body.replace("\r", "").replace("\n", "\r\n")))
+        for m in pend:
+            out.append("…  Anda (mengirim):\r\n" + m["text"].replace("\n", "\r\n"))
+        if not out:
+            out.append("Belum ada pesan.\r\nTulis pesan untuk Tim Support di bawah, lalu tekan Enter.")
+        return "\r\n\r\n".join(out)
+
+    def refresh(self):
+        u = self.u
+        if not _sup["on"]:
+            u.ShowWindow(self.bar, 0)
+            u.ShowWindow(self.chat, 0)
+            _sup["visible"] = False
+            return
+        self.place()
+        u.InvalidateRect(self.bar, None, False)
+        n = sup_unread()
+        if _sup["max"] > self.beeped and n and not _sup["visible"]:
+            u.MessageBeep(0x40)                                                  # pesan baru dari support (jendela chat tertutup)
+        self.beeped = max(self.beeped, _sup["max"])
+        if _sup["visible"]:
+            txt = self.transcript()
+            if txt != self.log_text:
+                self.log_text = txt
+                u.SetWindowTextW(self.h_log, txt)
+                u.SendMessageW(self.h_log, 0xB1, len(txt), len(txt))               # EM_SETSEL ke akhir
+                u.SendMessageW(self.h_log, 0xB7, 0, 0)                             # EM_SCROLLCARET
+            st = _sup["status"]
+            if _sup["emg"] == "open":
+                st = "DARURAT terkirim, menunggu support…" + ("" if st.startswith("Darurat") or not st else "  ·  " + st)
+            elif _sup["emg"] == "ack":
+                st = "DARURAT ditangani, support menuju lokasi."
+            u.SetWindowTextW(self.h_status, st)
+
+    def toggle_chat(self):
+        u = self.u
+        if _sup["visible"]:
+            self.hide_chat()
+            return
+        self.place(True)
+        _sup["visible"] = True
+        with _sup_lock:
+            if _sup["seen"] < _sup["max"]:
+                _sup["seen"] = _sup["max"]
+                _sup_save()
+        self.log_text = None
+        self.refresh()
+        u.ShowWindow(self.chat, 5)                                               # SW_SHOW
+        u.SetForegroundWindow(self.chat)
+        u.SetFocus(self.h_input)
+        _sup_wake.set()                                                          # ambil pesan terbaru + tandai dibaca
+
+    def hide_chat(self):
+        _sup["visible"] = False
+        self.u.ShowWindow(self.chat, 0)
+        self.u.InvalidateRect(self.bar, None, False)
+
+    def send_input(self):
+        u = self.u
+        n = u.GetWindowTextLengthW(self.h_input)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        u.GetWindowTextW(self.h_input, buf, n + 1)
+        text = buf.value.strip()
+        if text:
+            sup_send("chat", text)
+            u.SetWindowTextW(self.h_input, "")
+        u.SetFocus(self.h_input)
+
+    def emergency(self):
+        if _sup["emg"] == "sending":
+            return
+        log.warning("tombol DARURAT ditekan")
+        self.u.MessageBeep(0x30)
+        sup_send("emergency")
+
+    # ---------- pesan jendela ----------
+    def bar_proc(self, hwnd, msg, wp, lp):
+        try:
+            if msg == 0x21:                                                      # WM_MOUSEACTIVATE: jangan ambil fokus
+                return 3                                                         # MA_NOACTIVATE
+            if msg == 0x0F:                                                      # WM_PAINT
+                self.paint_bar(hwnd)
+                return 0
+            if msg == 0x202:                                                     # WM_LBUTTONUP
+                x = ctypes.c_short(lp & 0xFFFF).value
+                if x < self.s(self.CHAT_W):
+                    self.toggle_chat()
+                elif x >= self.s(self.CHAT_W + self.GAP):
+                    self.emergency()
+                return 0
+            if msg == 0x113:                                                     # WM_TIMER: kedip + tetap paling atas
+                self.tick += 1
+                self.blink = not self.blink
+                if self.tick % 4 == 0 or sup_unread() or _sup["emg"] in ("sending", "open"):
+                    self.refresh()
+                return 0
+            if msg == 0x8001:                                                    # WM_APP+1 dari thread lain
+                self.refresh()
+                return 0
+            if msg == 0x10:                                                      # WM_CLOSE: tombol tidak bisa ditutup
+                return 0
+        except Exception:
+            log.exception("support: tombol")
+        return self.u.DefWindowProcW(hwnd, msg, wp, lp)
+
+    def chat_proc(self, hwnd, msg, wp, lp):
+        try:
+            if msg == 0x111:                                                     # WM_COMMAND
+                cid = wp & 0xFFFF
+                if cid == self.ID_SEND:
+                    self.send_input()
+                    return 0
+                if cid == self.ID_CANCEL:
+                    self.hide_chat()
+                    return 0
+            if msg == 0x138 and lp == (self.h_log or 0):                         # WM_CTLCOLORSTATIC: riwayat chat berlatar putih
+                self.g.SetBkColor(wp, 0xFFFFFF)
+                return self.g.GetStockObject(0) or 0                             # WHITE_BRUSH
+            if msg == 0x10:                                                      # WM_CLOSE: sembunyikan saja
+                self.hide_chat()
+                return 0
+        except Exception:
+            log.exception("support: jendela chat")
+        return self.u.DefWindowProcW(hwnd, msg, wp, lp)
+
+
 # ---------- loop utama ----------
 def main():
     global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture
@@ -1196,6 +1670,8 @@ def main():
                     wallpaper_sync(j["wallpaper"])
                 if "policy" in j:                                # daya & Windows Update (server lama tidak mengirim)
                     policy_sync(j["policy"])
+                if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
+                    support_sync(j["support"])
             if _upd["restart"]:
                 restart_for_update()                             # hasil update sudah dilaporkan; penjaga mengambil alih
         except Exception as e:

@@ -30,6 +30,7 @@ function icon($name, $cls = 'ic') {
         'chart'     => '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="1"/><rect x="12" y="8" width="3" height="10" rx="1"/><rect x="17" y="5" width="3" height="13" rx="1"/>',
         'power'     => '<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>',
         'shield'    => '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+        'chat'      => '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/>',
         'camera'    => '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
     ];
     return '<svg class="' . $cls . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ($p[$name] ?? '') . '</svg>';
@@ -46,7 +47,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=27">'
+       . '<link rel="stylesheet" href="style.css?v=28">'
        . '<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
@@ -58,6 +59,7 @@ function nav_items() {
         'index'      => ['Dashboard', 'dashboard'],
         'monitor'    => ['Monitor', 'monitor'],
         'report'     => ['Laporan', 'chart'],
+        'support'    => ['Support', 'chat'],
         'devices'    => ['Devices', 'devices'],
         'categories' => ['Kategori', 'tag'],
         'wallpaper'  => ['Wallpaper', 'image'],
@@ -83,7 +85,8 @@ function topbar($active, $subtitle = '', $extra_right = '') {
        . '<button class="icon-btn nav-toggle" type="button" data-nav-toggle aria-label="Menu" aria-expanded="false">' . icon('menu') . '</button>'
        . '<nav class="nav" id="nav">';
     foreach (nav_items() as $k => [$label, $ic]) {
-        echo '<a href="' . $k . '.php"' . ($k === $active ? ' class="active" aria-current="page"' : '') . '>' . icon($ic) . '<span>' . $label . '</span></a>';
+        echo '<a href="' . $k . '.php" title="' . $label . '"' . ($k === $active ? ' class="active" aria-current="page"' : '') . '>' . icon($ic) . '<span>' . $label . '</span>'
+           . ($k === 'support' ? '<b class="nav-badge" data-sup-badge hidden></b>' : '') . '</a>';
     }
     echo '</nav><div class="top-right">' . $extra_right . theme_button()
        . '<div class="user"><span class="avatar">' . h(strtoupper(substr($u['username'], 0, 1))) . '</span>'
@@ -94,6 +97,10 @@ function topbar($active, $subtitle = '', $extra_right = '') {
 
 function page_foot($scripts = []) {
     echo '<script src="ui.js?v=4"></script>';
+    // alarm darurat & pesan baru dari laptop (menu Support) di semua halaman setelah login
+    if (function_exists('current_user') && ($u = current_user())) {
+        echo '<script src="support_alert.js?v=1" data-csrf="' . csrf_token() . '" data-role="' . h($u['role']) . '"></script>';
+    }
     foreach ($scripts as $s) echo '<script src="' . h($s) . '"></script>';
     echo '</body></html>';
 }

@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 4;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan
+const SCHEMA_VERSION = 5;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11)
 
 function schema_version(PDO $pdo) {
     try {
@@ -190,6 +190,23 @@ function schema_apply(PDO $pdo) {
             'SPECIAL GUEST' => 'ID-CARD', 'TEMPORARY' => 'ID-CARD', 'COMMITTEE' => 'ID-CARD', 'VIP' => 'ID-CARD'] as $c => $g) $st->execute([$c, $g]);
         $done[] = 'group kategori scan awal dibuat';
     }
+    // Chat support & tombol darurat dari laptop (agent >= 1.11). sender: agent = petugas di laptop, admin = tim support,
+    // system = pesan otomatis (mis. "darurat ditangani"). read_at: dibaca pihak seberang. cid: id kiriman agent (anti dobel).
+    $table('support_msgs', "
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  sender ENUM('agent','admin','system') NOT NULL,
+  author VARCHAR(50) NOT NULL DEFAULT '',
+  kind ENUM('chat','emergency') NOT NULL DEFAULT 'chat',
+  body VARCHAR(1000) NOT NULL,
+  cid VARCHAR(40) NULL,
+  created_at DATETIME NOT NULL,
+  read_at DATETIME NULL,
+  ack_at DATETIME NULL,
+  ack_by VARCHAR(50) NULL,
+  UNIQUE KEY dev_cid (device_id, cid),
+  INDEX dev_id (device_id, id),
+  INDEX kind_ack (kind, ack_at)");
 
     // Kategori bawaan hanya untuk database baru (kategori yang sengaja dihapus tidak muncul lagi)
     if ($fresh) {

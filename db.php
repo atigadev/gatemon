@@ -178,6 +178,9 @@ function settings_spec() {
             'help' => 'Data scan yang lebih lama dihapus otomatis.'],
         'scan_fail_alert' => ['label' => 'Peringatan scan tidak ditemukan', 'unit' => 'per menit', 'min' => 0, 'max' => 100, 'def' => 5,
             'help' => 'Bunyikan peringatan bila satu laptop mendapat sebanyak ini scan "tidak ditemukan" dalam 1 menit. 0 = mati.'],
+        // chat support & tombol darurat di laptop (agent >= 1.11)
+        'support_overlay' => ['label' => 'Tombol Chat Support & DARURAT di laptop', 'type' => 'bool', 'min' => 0, 'max' => 1, 'def' => 1,
+            'help' => 'Tombol kecil di pojok kanan bawah layar laptop: petugas bisa chat dengan tim support (menu Support) dan menekan DARURAT yang langsung membunyikan alarm di halaman admin.'],
     ];
 }
 function settings_all() {
@@ -320,6 +323,43 @@ function policy_cfg() {
     return ['power' => isset(POWER_MODES[$p]) ? $p : '', 'winupdate' => isset(WINUPDATE_MODES[$w]) ? $w : ''];
 }
 const POLICY_MIN = '1.10.0';   // agent mulai versi ini menerapkan kebijakan daya & Windows Update
+
+// ---------- chat support & tombol darurat (agent >= 1.11, tabel support_msgs) ----------
+const SUPPORT_MIN = '1.11.0';    // agent mulai versi ini punya tombol Chat Support & DARURAT
+const SUPPORT_ACK_SHOW = 120;    // detik: laptop menampilkan "DITANGANI" selama ini setelah darurat ditangani
+const SUPPORT_KEEP_DAYS = 90;    // pesan yang lebih lama dihapus otomatis
+const SUPPORT_EMERGENCY_TEXT = 'DARURAT - petugas membutuhkan bantuan segera';
+// Isi pesan: UTF-8 valid, tanpa karakter kontrol (kecuali baris baru), maks 1000 karakter
+function support_text($s) {
+    $s = mb_convert_encoding((string)$s, 'UTF-8', 'UTF-8');
+    $s = preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/u', ' ', str_replace(["\r\n", "\r"], "\n", $s)) ?? '';
+    return mb_substr(trim(preg_replace("/\n{3,}/", "\n\n", $s)), 0, 1000);
+}
+// Untuk balasan heartbeat: id pesan terakhir dari support (agent mengambil pesan bila lebih baru) + status darurat
+function support_hb($d) {
+    if (!setting('support_overlay')) return ['on' => 0];
+    $st = db()->prepare("SELECT MAX(CASE WHEN sender<>'agent' THEN id END) last,
+        MAX(kind='emergency' AND ack_at IS NULL) open, MAX(kind='emergency' AND ack_at >= NOW() - INTERVAL " . SUPPORT_ACK_SHOW . " SECOND) ack
+        FROM support_msgs WHERE device_id=?");
+    $st->execute([$d['id']]);
+    $r = $st->fetch();
+    return ['on' => 1, 'last' => (int)$r['last'], 'emg' => $r['open'] ? 'open' : ($r['ack'] ? 'ack' : '')];
+}
+// Pesan percakapan satu laptop: id > $since (urut lama -> baru); $since 0 = 50 pesan terakhir
+function support_msgs($device_id, $since) {
+    $cols = "id, sender, author, kind, body, created_at, read_at IS NOT NULL AS seen, ack_at, ack_by";
+    if ($since > 0) {
+        $st = db()->prepare("SELECT $cols FROM support_msgs WHERE device_id=? AND id>? ORDER BY id LIMIT 200");
+        $st->execute([$device_id, $since]);
+        $rows = $st->fetchAll();
+    } else {
+        $st = db()->prepare("SELECT $cols FROM support_msgs WHERE device_id=? ORDER BY id DESC LIMIT 50");
+        $st->execute([$device_id]);
+        $rows = array_reverse($st->fetchAll());
+    }
+    foreach ($rows as &$r) { $r['id'] = (int)$r['id']; $r['seen'] = (bool)$r['seen']; }
+    return $rows;
+}
 
 // ---------- Wake-on-LAN (agent >= 1.7) ----------
 // MAC valid -> "AA:BB:CC:DD:EE:FF", selain itu null (MAC kosong/broadcast/multicast ditolak)

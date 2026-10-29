@@ -71,6 +71,7 @@ topbar('settings', 'Monitoring Laptop');
     <?php if ($k === 'auto_open_gate'): ?><h2 class="set-sec"><?= icon('monitor') ?> Halaman gate otomatis <span class="badge">agent 1.3+</span></h2><?php endif; ?>
     <?php if ($k === 'gate_check_interval'): ?><h2 class="set-sec"><?= icon('pulse') ?> Hemat trafik <span class="badge">agent 1.5+</span></h2><?php endif; ?>
     <?php if ($k === 'scan_capture'): ?><h2 class="set-sec"><?= icon('pulse') ?> Hasil scan halaman gate <span class="badge">agent 1.6+</span></h2><?php endif; ?>
+    <?php if ($k === 'support_overlay'): ?><h2 class="set-sec"><?= icon('chat') ?> Chat support &amp; darurat <span class="badge">agent 1.11+</span></h2><?php endif; ?>
     <div class="set-row">
       <div class="set-txt"><label for="s-<?= $k ?>"><?= h($s['label']) ?></label><p class="muted"><?= h($s['help']) ?></p>
         <small class="muted">Bawaan <?= $bool ? ($s['def'] ? 'aktif' : 'mati') : ($text ? '<code>' . h($s['def']) . '</code>' : (int)$s['def'] . ' ' . h($s['unit']) . ' · rentang ' . $s['min'] . '–' . $s['max']) ?></small></div>

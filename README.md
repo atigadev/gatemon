@@ -91,6 +91,21 @@ pasang ulang sekali lewat `/install/ID-LAPTOP`, setelah itu update cukup dari se
 - **Rollback otomatis**: bila versi baru tidak berhasil tersambung ke server dalam 150 detik, skrip penjaga
   mengembalikan versi lama, menjalankannya lagi, dan status laptop menjadi "Gagal: ... kembali ke versi lama".
 
+## Chat support & tombol DARURAT (agent 1.11+)
+Di pojok kanan bawah layar laptop ada dua tombol kecil yang selalu di atas jendela lain:
+- **Chat Support**: membuka jendela chat dengan tim support. Balasan dari server membuat tombol berkedip
+  oranye "Pesan baru (N)" dan berbunyi.
+- **DARURAT**: sekali klik langsung terkirim (tanpa konfirmasi). Status di tombol: MENGIRIM… → TERKIRIM ✓ → DITANGANI ✓.
+  Bila jaringan putus, agent terus mencoba mengirim ulang sampai diterima server.
+- Tombol **tidak mengambil fokus keyboard**, jadi scanner barcode tetap mengetik ke halaman gate.
+
+Di server, menu **Support** berisi percakapan per laptop (balas, tanda dibaca ✓✓, balasan cepat). Darurat yang belum
+ditangani memunculkan banner merah, sirene, dan kalimat yang dibacakan di **semua halaman admin** yang terbuka
+(Dashboard, Monitor, dan lainnya), sampai supervisor klik **Tangani**. Klik "Diamkan" hanya membisukan browser itu.
+Agar alarm berbunyi di PC server, biarkan halaman Dashboard atau Monitor terbuka di sana dan klik halaman sekali
+(browser baru mengizinkan suara setelah ada klik). Tombol di laptop bisa dimatikan di **Pengaturan → Chat support & darurat**.
+Pesan disimpan 90 hari.
+
 ## Daya & Windows Update laptop (agent 1.10+)
 Menu **Daya** mengatur dua hal untuk semua laptop dari server (global, "Jangan ubah" = GateMon tidak menyentuh).
 Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
