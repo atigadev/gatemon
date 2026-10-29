@@ -46,7 +46,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=25">'
+       . '<link rel="stylesheet" href="style.css?v=27">'
        . '<script>(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
