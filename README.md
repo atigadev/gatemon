@@ -114,6 +114,17 @@ Agar alarm berbunyi di PC server, biarkan halaman Dashboard atau Monitor terbuka
 (browser baru mengizinkan suara setelah ada klik). Tombol di laptop bisa dimatikan di **Pengaturan → Chat support & darurat**.
 Pesan disimpan 90 hari.
 
+## Layar live (agent 1.14+)
+Supervisor bisa melihat layar laptop secara langsung tanpa Radmin/aplikasi lain: Dashboard → klik laptop → **Layar live**
+(atau klik kanan card). Laptop mengirim gambar layar (JPEG, 1–2 per detik, hanya bila layar berubah) ke server, jadi tetap
+jalan walau server di hosting. Kualitas: Hemat (960 px, 1/dtk), Normal (1280 px, 2/dtk), Tajam (1600 px, 2/dtk);
+Normal ±0,5–1 Mbps selama dilihat.
+- Hanya melihat (tidak mengendalikan mouse/keyboard). Layar kunci Windows / UAC tidak bisa diambil.
+- Selama dilihat, di tengah atas layar laptop tampil tanda merah **"Layar sedang dilihat Tim IT (nama)"**: tidak mengambil
+  fokus, klik menembus, dan tidak ikut terekam.
+- Sesi berhenti saat halaman ditutup / tab disembunyikan, paling lama 30 menit (klik Mulai untuk lanjut). Setiap sesi
+  tercatat di log. Gambar tidak disimpan: hanya gambar terakhir di folder `live/` (tertutup dari web), dihapus saat sesi selesai.
+
 ## Daya & Windows Update laptop (agent 1.10+)
 Menu **Daya** mengatur dua hal untuk semua laptop dari server (global, "Jangan ubah" = GateMon tidak menyentuh).
 Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).

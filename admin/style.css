@@ -625,3 +625,20 @@ body.sup-page.sup-alarm-on{padding-bottom:0}
 .inline-form input{width:170px;height:34px}
 .sec-table .sec-ok b{color:var(--ok)}.sec-table .sec-warn b{color:var(--warn)}.sec-table .sec-bad b{color:var(--bad)}.sec-table .sec-info b{color:var(--muted)}
 .sec-table .sec-bad{background:var(--bad-bg)}
+
+/* ---------- layar live ---------- */
+.live-wrap{display:flex;flex-direction:column;gap:10px;max-width:none}
+.live-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between}
+.live-title{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:17px}
+.live-title small{font-size:12px}
+.live-dot{width:11px;height:11px;border-radius:50%;background:var(--muted)}
+.live-dot.on{background:var(--bad);box-shadow:0 0 0 0 rgba(248,87,107,.6);animation:liveping 1.6s infinite}
+@keyframes liveping{70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.live-ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.live-ctl select{height:38px;width:auto}
+.live-status{margin:0;font:500 12.5px var(--mono);color:var(--text-2)}
+.live-status.bad{color:var(--bad)}
+.live-screen{position:relative;background:#000;border-radius:var(--radius);border:1px solid var(--border);min-height:300px;display:grid;place-items:center;overflow:hidden}
+.live-screen img{display:block;max-width:100%;max-height:calc(100vh - 220px);object-fit:contain}
+.live-screen:fullscreen img{max-height:100vh}
+.live-empty{padding:40px}

@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1679,6 +1679,212 @@ class SupportUI:
         return self.u.DefWindowProcW(hwnd, msg, wp, lp)
 
 
+# ---------- layar live (agent >= 1.14) ----------
+# Saat supervisor membuka "Layar live" di dashboard, heartbeat membawa live.on=1: agent mengirim gambar layar (JPEG
+# kecil, 1-2 per detik, hanya bila berubah) ke api/live.php sampai server menjawab on=0 (penonton pergi). Selama itu
+# tanda "Layar sedang dilihat Tim IT" tampil di tengah atas layar: tidak mengambil fokus, bisa ditembus klik mouse,
+# dan tidak ikut terekam. Koneksi dari laptop ke server (sama seperti heartbeat), jadi tetap jalan bila server di hosting.
+LIVE = requests.Session()
+LIVE.headers.update({"X-Device-Key": CFG["device_key"], "X-Device-Token": CFG["token"]})
+_live = {"cfg": {}, "thread": None, "badge": None, "show": False}
+
+
+def live_sync(s):
+    """Dari heartbeat: mulai mengirim bila ada penonton. Berhenti diputuskan worker dari jawaban api/live.php."""
+    if not (s.get("on") and IS_WIN):
+        return
+    _live["cfg"] = s
+    t = _live["thread"]
+    if not (t and t.is_alive()):
+        _live["thread"] = threading.Thread(target=live_worker, daemon=True)
+        _live["thread"].start()
+
+
+def _live_grab(max_w, quality):
+    from PIL import ImageGrab
+    img = ImageGrab.grab()
+    if img.width > max_w:
+        img = img.resize((max_w, max(1, round(img.height * max_w / img.width))))
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
+def live_worker():
+    log.info("layar live mulai (dilihat %s)", _live["cfg"].get("by", ""))
+    _live["show"] = True
+    if IS_WIN and not (_live["badge"] and _live["badge"].is_alive()):
+        _live["badge"] = threading.Thread(target=_live_badge_main, daemon=True)
+        _live["badge"].start()
+    last, sent_at, fails = None, 0, 0
+    try:
+        while True:
+            cfg = _live["cfg"]
+            t0 = time.time()
+            fps = max(0.5, min(4.0, float(cfg.get("fps", 2) or 2)))
+            headers, data = {"Content-Type": "image/jpeg"}, b""
+            try:
+                jpg = _live_grab(max(320, min(3840, int(cfg.get("w", 1280)))), max(30, min(90, int(cfg.get("q", 60)))))
+                h = hashlib.md5(jpg).digest()
+                if h != last or t0 - sent_at > 15:          # layar sama: cukup tanda masih berjalan (body kosong)
+                    data, last = jpg, h
+            except Exception as e:                          # mis. layar kunci Windows / UAC
+                headers["X-Live-Err"] = ("layar tidak bisa diambil (%s)" % e)[:180]
+                last = None
+            try:
+                r = LIVE.post(f"{SERVER}/api/live.php", data=data, headers=headers, timeout=15)
+                j = r.json()
+                fails = 0
+                if data:
+                    sent_at = t0
+                if not j.get("on"):
+                    break
+                _live["cfg"] = j
+            except Exception as e:
+                fails += 1
+                log.debug("layar live: %s", e)
+                if fails >= 20:                             # server tidak terjangkau: berhenti, heartbeat memulai lagi bila perlu
+                    break
+                time.sleep(2)
+                continue
+            time.sleep(max(0.05, 1.0 / fps - (time.time() - t0)))
+    finally:
+        _live["show"] = False
+        log.info("layar live selesai")
+
+
+def _live_badge_main():
+    try:
+        LiveBadge().run()
+    except Exception:
+        log.exception("tanda layar live gagal tampil")
+
+
+class LiveBadge:
+    """Tanda merah kecil di tengah atas layar selama layar live dilihat."""
+    W_, H_ = 360, 30
+
+    def __init__(self):
+        import ctypes.wintypes as W
+        self.W = W
+        u = self.u = ctypes.WinDLL("user32", use_last_error=True)
+        g = self.g = ctypes.WinDLL("gdi32")
+        P, I, LR = ctypes.POINTER, ctypes.c_int, ctypes.c_ssize_t
+        self.WNDPROC = ctypes.WINFUNCTYPE(LR, W.HWND, W.UINT, W.WPARAM, W.LPARAM)
+
+        class WNDCLASSEXW(ctypes.Structure):
+            _fields_ = [("cbSize", W.UINT), ("style", W.UINT), ("lpfnWndProc", self.WNDPROC), ("cbClsExtra", I), ("cbWndExtra", I),
+                        ("hInstance", W.HINSTANCE), ("hIcon", W.HICON), ("hCursor", W.HANDLE), ("hbrBackground", W.HBRUSH),
+                        ("lpszMenuName", W.LPCWSTR), ("lpszClassName", W.LPCWSTR), ("hIconSm", W.HICON)]
+
+        class PAINTSTRUCT(ctypes.Structure):
+            _fields_ = [("hdc", W.HDC), ("fErase", W.BOOL), ("rcPaint", W.RECT), ("fRestore", W.BOOL), ("fIncUpdate", W.BOOL), ("rgb", ctypes.c_byte * 32)]
+        self.WNDCLASSEXW, self.PAINTSTRUCT = WNDCLASSEXW, PAINTSTRUCT
+        for fn, args, res in [
+            ("DefWindowProcW", [W.HWND, W.UINT, W.WPARAM, W.LPARAM], LR), ("RegisterClassExW", [P(WNDCLASSEXW)], W.ATOM),
+            ("UnregisterClassW", [W.LPCWSTR, W.HINSTANCE], W.BOOL),
+            ("CreateWindowExW", [W.DWORD, W.LPCWSTR, W.LPCWSTR, W.DWORD, I, I, I, I, W.HWND, W.HMENU, W.HINSTANCE, W.LPVOID], W.HWND),
+            ("SetWindowPos", [W.HWND, W.HWND, I, I, I, I, W.UINT], W.BOOL), ("ShowWindow", [W.HWND, I], W.BOOL),
+            ("IsWindowVisible", [W.HWND], W.BOOL), ("BeginPaint", [W.HWND, P(PAINTSTRUCT)], W.HDC), ("EndPaint", [W.HWND, P(PAINTSTRUCT)], W.BOOL),
+            ("FillRect", [W.HDC, P(W.RECT), W.HBRUSH], I), ("DrawTextW", [W.HDC, W.LPCWSTR, I, P(W.RECT), W.UINT], I),
+            ("InvalidateRect", [W.HWND, P(W.RECT), W.BOOL], W.BOOL), ("SetLayeredWindowAttributes", [W.HWND, W.COLORREF, W.BYTE, W.DWORD], W.BOOL),
+            ("GetMessageW", [P(W.MSG), W.HWND, W.UINT, W.UINT], W.BOOL), ("TranslateMessage", [P(W.MSG)], W.BOOL),
+            ("DispatchMessageW", [P(W.MSG)], LR), ("SetTimer", [W.HWND, ctypes.c_size_t, W.UINT, W.LPVOID], ctypes.c_size_t),
+            ("SystemParametersInfoW", [W.UINT, W.UINT, W.LPVOID, W.UINT], W.BOOL)]:
+            f = getattr(u, fn)
+            f.argtypes, f.restype = args, res
+        for fn, args, res in [
+            ("CreateSolidBrush", [W.COLORREF], W.HBRUSH), ("SelectObject", [W.HDC, W.HGDIOBJ], W.HGDIOBJ), ("DeleteObject", [W.HGDIOBJ], W.BOOL),
+            ("SetBkMode", [W.HDC, I], I), ("SetTextColor", [W.HDC, W.COLORREF], W.COLORREF),
+            ("CreateFontW", [I, I, I, I, I, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR], W.HFONT)]:
+            f = getattr(g, fn)
+            f.argtypes, f.restype = args, res
+        k = ctypes.WinDLL("kernel32")
+        k.GetModuleHandleW.argtypes, k.GetModuleHandleW.restype = [W.LPCWSTR], W.HMODULE
+        self.hinst = k.GetModuleHandleW(None)
+        self.dpi = 96
+        try:   # hanya thread ini yang DPI-aware (tajam di layar 125-150%)
+            u.SetThreadDpiAwarenessContext.argtypes, u.SetThreadDpiAwarenessContext.restype = [W.LPVOID], W.LPVOID
+            u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-2))
+            self.dpi = u.GetDpiForSystem() or 96
+        except Exception:
+            pass
+        self.text = ""
+
+    def s(self, v):
+        return int(round(v * self.dpi / 96))
+
+    def run(self):
+        u, W = self.u, self.W
+        self._proc = self.WNDPROC(self.proc)
+        u.UnregisterClassW("GateMonLiveBadge", self.hinst)
+        wc = self.WNDCLASSEXW(cbSize=ctypes.sizeof(self.WNDCLASSEXW), lpfnWndProc=self._proc, hInstance=self.hinst, lpszClassName="GateMonLiveBadge")
+        u.RegisterClassExW(ctypes.byref(wc))
+        self.font = self.g.CreateFontW(-int(round(10 * self.dpi / 72)), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI")
+        # TOPMOST | TOOLWINDOW | NOACTIVATE | LAYERED | TRANSPARENT (klik mouse menembus ke halaman gate di bawahnya)
+        self.hwnd = u.CreateWindowExW(0x8 | 0x80 | 0x08000000 | 0x80000 | 0x20, "GateMonLiveBadge", "GateMon Live", 0x80000000,
+                                      0, 0, self.s(self.W_), self.s(self.H_), None, None, self.hinst, None)
+        if not self.hwnd:
+            raise ctypes.WinError(ctypes.get_last_error())
+        u.SetLayeredWindowAttributes(self.hwnd, 0, 225, 0x2)                   # LWA_ALPHA
+        try:   # tidak ikut terekam di gambar layar live (Windows 10 2004+); versi lama: tanda ikut terlihat penonton
+            u.SetWindowDisplayAffinity(ctypes.c_void_p(self.hwnd), 0x11)       # WDA_EXCLUDEFROMCAPTURE
+        except Exception:
+            pass
+        u.SetTimer(self.hwnd, 1, 500, None)
+        msg = W.MSG()
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            u.TranslateMessage(ctypes.byref(msg))
+            u.DispatchMessageW(ctypes.byref(msg))
+
+    def tick(self):
+        u = self.u
+        if not _live["show"]:
+            if u.IsWindowVisible(self.hwnd):
+                u.ShowWindow(self.hwnd, 0)
+            return
+        by = str(_live["cfg"].get("by") or "")
+        text = "●  Layar sedang dilihat Tim IT" + (" (%s)" % by[:20] if by else "")
+        if text != self.text:
+            self.text = text
+            u.InvalidateRect(self.hwnd, None, True)
+        r = self.W.RECT()
+        u.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)                     # area kerja (tanpa taskbar)
+        w, h = self.s(self.W_), self.s(self.H_)
+        u.SetWindowPos(self.hwnd, self.W.HWND(-1), r.left + (r.right - r.left - w) // 2, r.top + self.s(4), w, h, 0x10 | 0x40)   # TOPMOST, NOACTIVATE|SHOWWINDOW
+
+    def paint(self):
+        u, g = self.u, self.g
+        ps = self.PAINTSTRUCT()
+        hdc = u.BeginPaint(self.hwnd, ctypes.byref(ps))
+        rc = self.W.RECT(0, 0, self.s(self.W_), self.s(self.H_))
+        br = g.CreateSolidBrush(0x1C1CB9)                                       # merah (#b91c1c)
+        u.FillRect(hdc, ctypes.byref(rc), br)
+        g.DeleteObject(br)
+        g.SetBkMode(hdc, 1)
+        g.SetTextColor(hdc, 0xFFFFFF)
+        old = g.SelectObject(hdc, self.font)
+        u.DrawTextW(hdc, self.text, -1, ctypes.byref(rc), 0x1 | 0x4 | 0x20 | 0x8000)   # CENTER|VCENTER|SINGLELINE|END_ELLIPSIS
+        g.SelectObject(hdc, old)
+        u.EndPaint(self.hwnd, ctypes.byref(ps))
+
+    def proc(self, hwnd, msg, wp, lp):
+        try:
+            if msg == 0x113:                                                     # WM_TIMER
+                self.tick()
+                return 0
+            if msg == 0x0F:                                                      # WM_PAINT
+                self.paint()
+                return 0
+            if msg == 0x21:                                                      # WM_MOUSEACTIVATE
+                return 3                                                         # MA_NOACTIVATE
+            if msg == 0x10:                                                      # WM_CLOSE: tidak bisa ditutup
+                return 0
+        except Exception:
+            log.exception("tanda layar live")
+        return self.u.DefWindowProcW(hwnd, msg, wp, lp)
+
+
 # ---------- pindah server (agent >= 1.13) ----------
 # Perintah SET_SERVER dari server lama: agent menguji dulu server baru dengan ID + token-nya (api/ping.php, harus
 # sudah berisi database yang sama). Berhasil -> hasil dilaporkan ke server LAMA, lalu config.json diganti. Server lama
@@ -1816,6 +2022,8 @@ def main():
                     gate_url = j["gate_url"]
                 if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
                     support_sync(j["support"])
+                if isinstance(j.get("live"), dict):             # layar live (server lama tidak mengirim)
+                    live_sync(j["live"])
                 for cmd in j.get("commands", []):
                     log.info("perintah #%s %s", cmd["id"], cmd["type"])
                     if cmd["type"] == "UPDATE_AGENT":            # hasil dilaporkan thread update sendiri

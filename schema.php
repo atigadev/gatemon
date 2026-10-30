@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 7;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik
+const SCHEMA_VERSION = 8;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14)
 
 function schema_version(PDO $pdo) {
     try {
@@ -127,6 +127,9 @@ function schema_apply(PDO $pdo) {
     $add('devices', $d, 'power_state', "ADD power_state VARCHAR(20) NULL, ADD winupdate_state VARCHAR(10) NULL, ADD policy_err VARCHAR(200) NULL");
     // tombol Chat Support & DARURAT per laptop: NULL = ikut menu Pengaturan, 1 = tampil, 0 = sembunyi; support_state dilaporkan agent
     $add('devices', $d, 'support_overlay', "ADD support_overlay TINYINT NULL, ADD support_state VARCHAR(220) NULL");
+    // layar live (agent >= 1.14): sesi aktif selama live_until di masa depan (diperpanjang halaman penonton);
+    // gambar terakhir disimpan sebagai file live/ID.jpg (ditimpa terus, dihapus saat sesi selesai)
+    $add('devices', $d, 'live_until', "ADD live_until DATETIME NULL, ADD live_started DATETIME NULL, ADD live_by VARCHAR(50) NULL, ADD live_mode VARCHAR(10) NULL, ADD live_seq INT NOT NULL DEFAULT 0, ADD live_at DATETIME NULL, ADD live_err VARCHAR(200) NULL, ADD live_w INT NULL, ADD live_h INT NULL");
     // gate_url boleh berisi beberapa URL (1 per baris): dibuka berdampingan kiri-kanan oleh agent >= 1.8
     if (stripos($d['gate_url'] ?? '', 'varchar(2000)') === false) {
         $pdo->exec("ALTER TABLE devices MODIFY gate_url VARCHAR(2000) NOT NULL DEFAULT ''");
@@ -189,6 +192,7 @@ function schema_apply(PDO $pdo) {
   created_by VARCHAR(50) NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL");
     if (!is_dir(__DIR__ . '/wallpaper')) @mkdir(__DIR__ . '/wallpaper', 0775);
+    if (!is_dir(__DIR__ . '/live')) @mkdir(__DIR__ . '/live', 0775);
     // Group kategori hasil scan untuk Laporan (kategori dari halaman gate -> group, mis. VIP -> ID-CARD).
     // Diisi pemetaan awal saat tabel dibuat; selanjutnya diatur dari menu Laporan.
     $new_groups = !in_array('scan_groups', $tables, true);

@@ -13,3 +13,6 @@ wallpaper/*
 !wallpaper/.htaccess
 # konfigurasi khusus server (password database, HTTPS): jangan pernah di-commit
 config.local.php
+# gambar layar live sementara
+live/*
+!live/.htaccess

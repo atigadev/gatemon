@@ -162,7 +162,7 @@ $gate_url = $gate_urls ? $gate_urls[0] : '';
 $w = wallpaper_for($d);
 $wc = wallpaper_cfg();
 $wallpaper = $w ? ['sha' => $w['sha256'], 'ext' => $w['ext'], 'bytes' => (int)$w['bytes'], 'style' => $wc['style'], 'lock' => $wc['lock']] : null;
-json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'support' => support_hb($d), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
+json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'support' => support_hb($d), 'live' => live_hb($d), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
     'auto_open' => setting('auto_open_gate'), 'auto_reopen' => setting('auto_reopen_gate'), 'reopen_after' => setting('reopen_after'),
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),

@@ -33,7 +33,7 @@ if ($cpanel) {
     $zip->addFile("$root/migrasi/BACA-SAYA.txt", $top . 'BACA-SAYA.txt');
 }
 // paket cPanel: tanpa config.local.php server ini (isinya untuk server lama) dan tanpa alat Windows server
-$skip = '#^(\.git/|agent/browser-profile/|migrasi/(backup-.*|database)\.sql$' . ($cpanel ? '|config\.local\.php$|migrasi/INSTALL-SERVER\.bat$|admin-tools/' : '') . ')|\.log$#i';
+$skip = '#^(\.git/|agent/browser-profile/|live/.+\.(jpg|tmp)$|migrasi/(backup-.*|database)\.sql$' . ($cpanel ? '|config\.local\.php$|migrasi/INSTALL-SERVER\.bat$|admin-tools/' : '') . ')|\.log$#i';
 $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
 $nfiles = 0;
 foreach ($it as $f) {

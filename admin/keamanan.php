@@ -64,7 +64,7 @@ $add('Akun', 'Login gagal 24 jam terakhir', $f24 > 50 ? 'warn' : 'info', "$f24 k
 $base = ($https ? 'https' : 'http') . '://' . preg_replace('/[^A-Za-z0-9.\-:\[\]]/', '', (string)$_SERVER['HTTP_HOST'])
       . rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME']))), '/');
 $probe = ['config.php', 'config.local.php', 'db.php', 'security.php', 'schema.php', '.git/HEAD', '.user.ini', '.htaccess', 'README.md', 'agent/agent.py',
-    'agent/release.json', 'agent/install_agent.ps1', 'migrasi/import.php', 'migrasi/BACA-SAYA.txt', 'admin-tools/rilis-agent.php', 'admin/auth.php', 'admin/layout.php', 'wallpaper/.htaccess'];
+    'agent/release.json', 'agent/install_agent.ps1', 'migrasi/import.php', 'migrasi/BACA-SAYA.txt', 'admin-tools/rilis-agent.php', 'admin/auth.php', 'admin/layout.php', 'wallpaper/.htaccess', 'live/.htaccess'];
 $ctx = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 5, 'ignore_errors' => true, 'follow_location' => 0, 'header' => "User-Agent: GateMon-security-check\r\n"],
     'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]]);
 foreach ($probe as $p) {

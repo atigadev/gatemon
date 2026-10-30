@@ -337,6 +337,21 @@ function policy_cfg() {
 }
 const POLICY_MIN = '1.10.0';   // agent mulai versi ini menerapkan kebijakan daya & Windows Update
 
+// ---------- layar live (agent >= 1.14) ----------
+const LIVE_MIN = '1.14.0';
+const LIVE_MAX_MINUTES = 30;          // satu sesi paling lama ini, lalu penonton harus klik "Lanjutkan"
+const LIVE_MAX_BYTES = 3000000;       // batas satu gambar dari agent
+// mode => [label, lebar maks (px), kualitas JPEG, gambar per detik]
+const LIVE_MODES = ['hemat' => ['Hemat - 960 px, 1 gambar/dtk', 960, 50, 1], 'normal' => ['Normal - 1280 px, 2 gambar/dtk', 1280, 60, 2],
+    'tajam' => ['Tajam - 1600 px, 2 gambar/dtk', 1600, 75, 2]];
+function live_path($device_id) { return __DIR__ . '/live/' . (int)$device_id . '.jpg'; }
+// Untuk agent (heartbeat & api/live.php): kirim gambar layar selama ada penonton
+function live_hb($d) {
+    if (empty($d['live_until']) || strtotime($d['live_until']) <= time()) return ['on' => 0];
+    $m = LIVE_MODES[$d['live_mode'] ?? ''] ?? LIVE_MODES['normal'];
+    return ['on' => 1, 'w' => $m[1], 'q' => $m[2], 'fps' => $m[3], 'by' => (string)$d['live_by']];
+}
+
 // ---------- chat support & tombol darurat (agent >= 1.11, tabel support_msgs) ----------
 const SUPPORT_MIN = '1.11.0';    // agent mulai versi ini punya tombol Chat Support & DARURAT
 const SUPPORT_ACK_SHOW = 120;    // detik: laptop menampilkan "DITANGANI" selama ini setelah darurat ditangani

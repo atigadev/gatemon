@@ -3,6 +3,9 @@
 const CSRF = document.querySelector('meta[name=csrf]').content;
 const ROLE = document.querySelector('meta[name=role]').content;
 const SUP = ROLE === 'supervisor';
+// versi agent a >= b (mis. '1.14.0')
+const verGe = (a, b) => { const x = String(a||'0').split('.').map(Number), y = b.split('.').map(Number); for(let i=0;i<3;i++){ if((x[i]||0)!==(y[i]||0)) return (x[i]||0)>(y[i]||0); } return true; };
+const canLive = d => SUP && verGe(d.agent_version, '1.14.0');   // layar live: agent 1.14+
 const WALL = document.body.classList.contains('wall');
 const $ = id => document.getElementById(id);
 let lastData = null;
@@ -111,7 +114,7 @@ function detailHtml(d){
     ${line('Radmin Server', d.radmin_ok?'siap':'tidak aktif', !d.radmin_ok)}
     ${line('Baterai / uptime', (d.battery==null?'-':d.battery+'%'+(d.battery_plugged?' ⚡':''))+' / '+fmtUp(d.uptime_sec))}
     ${line('Terakhir lapor / agent', esc(d.last_seen||'belum pernah')+' / '+esc(d.agent_version||'-'))}
-    ${radmin||cmds ? `<div class="actions">${radmin}${cmds}</div>` : ''}
+    ${radmin||cmds ? `<div class="actions">${canLive(d) ? `<a class="btn btn-primary" href="live.php?dev=${d.id}" target="_blank" rel="noopener" title="Lihat layar laptop secara langsung (tanpa Radmin)">Layar live</a>` : ''}${radmin}${cmds}</div>` : ''}
     ${recentCmds(d)}
     ${d.scan_enabled ? `<div class="scan-box"><h4>Scan hari ini <span class="scan-chips">${scanChips(d.scan)}</span>
       ${d.scan&&d.scan.last?`<small class="muted">terakhir ${esc(d.scan.last.slice(11,19))}</small>`:''}</h4>
@@ -301,6 +304,7 @@ document.addEventListener('click', e=>{
 // ---------- menu klik kanan pada card laptop (aksi sama dengan panel detail) ----------
 const CTX_IC = {
   detail:'<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  live:'<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/>',
   radmin:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   PING:'<path d="M3 12h4l3-8 4 16 3-8h4"/>',
@@ -321,6 +325,7 @@ function openCtx(d, x, y){
   closeCtx();
   const gate = d.mode !== 'monitor';
   const items = [{a:'detail', l:'Detail laptop'}];
+  if(canLive(d)) items.push({a:'live', l:'Layar live'});
   if(d.ip) items.push({a:'radmin', l:'Remote via Radmin'}, {a:'copy', l:'Salin IP', hint:d.ip});
   if(SUP){
     items.push('sep');
@@ -346,6 +351,7 @@ function runCtx(btn){
   const d = lastData && lastData.devices.find(x=>String(x.id)===ctxEl.dataset.id); closeCtx(); if(!d) return;
   const a = btn.dataset.ctx;
   if(a==='detail') showDetail(d.id);
+  else if(a==='live') window.open('live.php?dev=' + d.id, '_blank', 'noopener');
   else if(a==='radmin') location.href = 'radmin://' + d.ip;
   else if(a==='copy') navigator.clipboard?.writeText(d.ip);
   else if(a==='cmd') askAndSend(btn.dataset.c, String(d.id), d.name);
