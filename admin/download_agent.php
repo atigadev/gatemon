@@ -12,7 +12,7 @@ if (!preg_match('#^https?://[^\s/]+(/\S*)?$#i', $server)) die('URL server tidak 
 $pdo = db();
 $id = $_GET['id'] ?? '';
 $agent_dir = realpath(__DIR__ . '/../agent');
-$files = ['agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat'];
+$files = ['agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat', 'uninstall_agent.ps1'];
 
 // Installer umum (sama untuk semua laptop, tanpa token): login dengan kode instalasi sekali pakai.
 // Ikut disertakan isi agent/installer/ (installer python-*.exe dan folder wheels\ bila disiapkan).

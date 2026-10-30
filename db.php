@@ -142,7 +142,7 @@ function agent_config($d, $server) {
 // Isi paket agent ke ZIP: file agent + isi agent/installer (python-*.exe, wheels\). Mengembalikan daftar file tambahan.
 function agent_zip_files($zip, $folder) {
     $dir = __DIR__ . '/agent';
-    foreach (['agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat'] as $f) $zip->addFile("$dir/$f", $folder . $f);
+    foreach (['agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat', 'uninstall_agent.ps1'] as $f) $zip->addFile("$dir/$f", $folder . $f);
     $extra = [];
     if (is_dir("$dir/installer")) {
         $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$dir/installer", FilesystemIterator::SKIP_DOTS));

@@ -43,6 +43,25 @@ $sk = hex2bin(reset($lines));
 $pk = bin2hex(sodium_crypto_sign_publickey_from_secretkey($sk));
 $src = file_get_contents($agentPy);
 if (pubkey_in_agent($src) !== $pk) fail("kunci ini tidak cocok dengan UPDATE_PUBKEY di agent.py. Agent akan menolak rilis ini.");
+// Uninstaller ikut di dalam agent.py (update otomatis hanya memasang file .py/.txt; agent menulisnya ke foldernya saat
+// mulai). Isi agent/uninstall_agent.bat & .ps1 disalin ke blok _UNINSTALL_FILES sebelum ditandatangani.
+function sync_uninstaller($src, $root) {
+    foreach (['uninstall_agent.bat', 'uninstall_agent.ps1'] as $f) {
+        $txt = str_replace("\r\n", "\n", (string)file_get_contents("$root/agent/$f"));
+        if (preg_match('/[^\x09\x0A\x20-\x7E]/', $txt)) fail("$f harus berisi karakter ASCII saja");
+        if (strpos($txt, '"""') !== false || substr(rtrim($txt, "\n"), -1) === '\\') fail("$f tidak bisa disisipkan ke agent.py (memuat \"\"\" / diakhiri \\)");
+        $re = '/^    "' . preg_quote($f, '/') . '": r""".*?""",$/ms';
+        if (!preg_match($re, $src)) fail("blok $f di _UNINSTALL_FILES (agent.py) tidak ditemukan");
+        $src = preg_replace_callback($re, function () use ($f, $txt) { return '    "' . $f . '": r"""' . $txt . '""",'; }, $src, 1);
+    }
+    return $src;
+}
+$synced = sync_uninstaller($src, $root);
+if ($synced !== $src) {
+    file_put_contents($agentPy, $synced);
+    $src = $synced;
+    echo "Uninstaller (agent/uninstall_agent.bat & .ps1) disalin ke agent.py.\n";
+}
 if (!preg_match('/^VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"/m', $src, $m)) fail('VERSION di agent.py tidak terbaca');
 $version = $m[1];
 $files = [];

@@ -193,6 +193,21 @@ Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
 - Browser gate memakai profil sendiri `C:\GateMon-Agent\browser-profile`, jadi Chrome/Edge biasa milik petugas tidak
   dianggap "browser gate", dan "Restart browser" hanya menutup jendela gate.
 
+## Melepas agent dari laptop
+Di laptop, buka folder agent (`C:\GateMon-Agent`) lalu klik dua kali **uninstall_agent.bat** (izin Administrator
+diminta) dan ketik **Y**. Uninstaller (agent 1.15+):
+1. menghapus tugas otomatis `GateMonAgent`;
+2. menghentikan hanya proses yang memakai folder agent (agent, browser gate berprofil folder itu, penjaga update),
+   bukan program Python/Chrome lain;
+3. mengembalikan wallpaper asli dan mengaktifkan lagi Windows Update bila pernah diubah GateMon (pengaturan daya dibiarkan);
+4. **menghapus seluruh folder agent** (log, config.json berisi token, profil browser gate, wallpaper unduhan). File yang
+   masih terkunci dihapus otomatis setelah restart.
+
+Python dan library-nya tidak dihapus (bisa dipakai program lain). Pengaman: hanya folder yang berisi `agent.py` +
+`config.json` GateMon yang dihapus, tidak pernah akar drive / folder sistem / profil pengguna. Laptop tetap tercatat di
+dashboard (offline): hapus di menu Devices. Laptop lama mendapat uninstaller baru cukup lewat update agent ke 1.15
+(uninstaller ikut di `agent.py` dan ditulis ke folder agent saat agent berjalan).
+
 ## Server di hosting / IP lokal
 Agent 1.2+ melaporkan **IP LAN**-nya sendiri, jadi IP, link Radmin dan live camera tetap benar walau server di hosting
 (server hanya melihat IP publik router; disimpan terpisah sebagai "IP publik"). Agent lama tetap jalan memakai

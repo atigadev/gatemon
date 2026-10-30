@@ -140,7 +140,7 @@ Say "      Python: $py ($($cand.Ver), $($cand.Bits)-bit)" Green
 Say "[3/5] Menyalin file ke $Target ..."
 try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch {}
 New-Item -ItemType Directory -Force $Target | Out-Null
-foreach ($f in 'agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat', 'BACA-SAYA.txt') {
+foreach ($f in 'agent.py', 'requirements.txt', 'install_agent.bat', 'install_agent.ps1', 'uninstall_agent.bat', 'uninstall_agent.ps1', 'BACA-SAYA.txt') {
     $s = Join-Path $Here $f
     if ((Test-Path $s) -and ((Resolve-Path $s).Path -ne (Join-Path $Target $f))) { Copy-Item $s $Target -Force }
 }
