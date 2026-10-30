@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.15.0"
+VERSION = "1.16.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1347,9 +1347,13 @@ class SupportUI:
 
         class PAINTSTRUCT(ctypes.Structure):
             _fields_ = [("hdc", W.HDC), ("fErase", W.BOOL), ("rcPaint", W.RECT), ("fRestore", W.BOOL), ("fIncUpdate", W.BOOL), ("rgb", ctypes.c_byte * 32)]
-        self.WNDCLASSEXW, self.PAINTSTRUCT = WNDCLASSEXW, PAINTSTRUCT
+        class SCROLLINFO(ctypes.Structure):
+            _fields_ = [("cbSize", W.UINT), ("fMask", W.UINT), ("nMin", I), ("nMax", I), ("nPage", W.UINT), ("nPos", I), ("nTrackPos", I)]
+        self.WNDCLASSEXW, self.PAINTSTRUCT, self.SCROLLINFO = WNDCLASSEXW, PAINTSTRUCT, SCROLLINFO
         for fn, args, res in [
             ("DefWindowProcW", [W.HWND, W.UINT, W.WPARAM, W.LPARAM], LR), ("RegisterClassExW", [P(WNDCLASSEXW)], W.ATOM),
+            ("GetClientRect", [W.HWND, P(W.RECT)], W.BOOL), ("GetDC", [W.HWND], W.HDC), ("ReleaseDC", [W.HWND, W.HDC], I),
+            ("SetScrollInfo", [W.HWND, I, P(SCROLLINFO), W.BOOL], I), ("GetScrollInfo", [W.HWND, I, P(SCROLLINFO)], W.BOOL),
             ("CreateWindowExW", [W.DWORD, W.LPCWSTR, W.LPCWSTR, W.DWORD, I, I, I, I, W.HWND, W.HMENU, W.HINSTANCE, W.LPVOID], W.HWND),
             ("SendMessageW", [W.HWND, W.UINT, W.WPARAM, W.LPARAM], LR), ("SetWindowPos", [W.HWND, W.HWND, I, I, I, I, W.UINT], W.BOOL),
             ("ShowWindow", [W.HWND, I], W.BOOL), ("IsWindowVisible", [W.HWND], W.BOOL), ("BeginPaint", [W.HWND, P(PAINTSTRUCT)], W.HDC),
@@ -1369,7 +1373,9 @@ class SupportUI:
             ("CreateSolidBrush", [W.COLORREF], W.HBRUSH), ("CreatePen", [I, I, W.COLORREF], W.HPEN), ("SelectObject", [W.HDC, W.HGDIOBJ], W.HGDIOBJ),
             ("DeleteObject", [W.HGDIOBJ], W.BOOL), ("RoundRect", [W.HDC, I, I, I, I, I, I], W.BOOL), ("SetBkMode", [W.HDC, I], I),
             ("SetTextColor", [W.HDC, W.COLORREF], W.COLORREF), ("SetBkColor", [W.HDC, W.COLORREF], W.COLORREF), ("GetStockObject", [I], W.HGDIOBJ),
-            ("CreateFontW", [I, I, I, I, I, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR], W.HFONT)]:
+            ("CreateFontW", [I, I, I, I, I, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR], W.HFONT),
+            ("CreateCompatibleDC", [W.HDC], W.HDC), ("CreateCompatibleBitmap", [W.HDC, I, I], W.HBITMAP), ("DeleteDC", [W.HDC], W.BOOL),
+            ("BitBlt", [W.HDC, I, I, I, I, W.HDC, I, I, W.DWORD], W.BOOL)]:
             f = getattr(g, fn)
             f.argtypes, f.restype = args, res
         k.GetModuleHandleW.argtypes, k.GetModuleHandleW.restype = [W.LPCWSTR], W.HMODULE
@@ -1378,7 +1384,7 @@ class SupportUI:
         self.tick = 0
         self.beeped = _sup["seen"]
         self.bar = self.chat = None
-        self.log_text = None
+        self.items, self.lay, self.scroll, self.log_h = None, [], 0, 0      # riwayat chat (bubble)
         self.last_pos = None
 
     # ---------- persiapan: DPI, gaya kontrol Windows modern ----------
@@ -1436,6 +1442,9 @@ class SupportUI:
         u = self.u
         self._setup()
         self.f_bar, self.f_ui = self.font(10, True), self.font(10)
+        self.f_bold, self.f_small, self.f_name = self.font(10, True), self.font(8.5), self.font(8.5, True)
+        self._log_proc = self.WNDPROC(self.log_proc)
+        self.register("GateMonChatLog", self._log_proc, 32512)
         self._bar_proc, self._chat_proc = self.WNDPROC(self.bar_proc), self.WNDPROC(self.chat_proc)   # disimpan: jangan sampai dibuang GC
         self.register("GateMonSupportBar", self._bar_proc, 32649)     # IDC_HAND
         self.register("GateMonSupportChat", self._chat_proc, 32512)   # IDC_ARROW
@@ -1473,7 +1482,7 @@ class SupportUI:
         p, m = s(10), s(8)
         mk = lambda cls, text, st, exs, x, y, w, h, cid: u.CreateWindowExW(exs, cls, text, 0x40000000 | 0x10000000 | st, x, y, w, h,
                                                                           self.chat, self.W.HMENU(cid), self.hinst, None)
-        self.h_log = mk("EDIT", "", 0x00200000 | 0x4 | 0x800 | 0x40, 0x200, p, p, cw - 2 * p, ch - s(100), self.ID_LOG)   # VSCROLL MULTILINE READONLY AUTOVSCROLL
+        self.h_log = mk("GateMonChatLog", "", 0x00200000, 0x200, p, p, cw - 2 * p, ch - s(100), self.ID_LOG)   # riwayat bubble, WS_VSCROLL
         self.h_status = mk("STATIC", "", 0, 0, p, ch - s(86), cw - 2 * p, s(20), self.ID_STATUS)
         self.h_input = mk("EDIT", "", 0x00010000 | 0x80, 0x200, p, ch - s(60), cw - 2 * p - s(90) - m, s(30), self.ID_INPUT)   # TABSTOP AUTOHSCROLL
         self.h_send = mk("BUTTON", "Kirim", 0x00010000 | 0x1, 0, cw - p - s(90), ch - s(60), s(90), s(30), self.ID_SEND)  # DEFPUSHBUTTON
@@ -1533,22 +1542,155 @@ class SupportUI:
             cw, chh = self.chat_size
             u.SetWindowPos(self.chat, self.W.HWND(-1), max(l, r - cw - s(self.MARGIN)), max(t, y - chh - s(8)), 0, 0, 0x1 | 0x10)  # NOSIZE | NOACTIVATE
 
-    def transcript(self):
+    # ---------- riwayat chat: bubble seperti aplikasi chat (kanan = petugas, kiri = support, tengah = info) ----------
+    # warna COLORREF 0x00BBGGRR
+    C_BG, C_ME, C_PEND, C_EMG, C_THEM, C_THEM_LINE = 0xF7F2EE, 0xEB6325, 0xFAA560, 0x2626DC, 0xFFFFFF, 0xE6DCD5
+    C_TEXT, C_NAME, C_TIME, C_SYS, C_SYS_LINE, C_SYS_TEXT = 0x37291F, 0xC76902, 0x8B7464, 0xE7FCDC, 0xD0F7BB, 0x346516
+
+    def chat_items(self):
         with _sup_lock:
             msgs, pend = list(_sup["msgs"]), [m for m in _sup_out if m["kind"] == "chat"]
-        out = []
+        items = []
         for m in msgs:
-            who = {"agent": "Anda", "system": "Info"}.get(m["sender"], "Support" + (" (%s)" % m["author"] if m.get("author") else ""))
-            body = str(m.get("body", ""))
-            if m.get("kind") == "emergency" and not body.upper().startswith("DARURAT"):
-                body = "[DARURAT] " + body
-            out.append("%s  %s:\r\n%s" % (str(m.get("created_at", ""))[11:16], who, body.replace("\r", "").replace("\n", "\r\n")))
+            body = str(m.get("body", "")).replace("\r", "").strip() or " "
+            t = str(m.get("created_at", ""))[11:16]
+            if m["sender"] == "system":
+                items.append(("sys", "", body, t, False))
+            elif m["sender"] == "agent":
+                emg = m.get("kind") == "emergency"
+                items.append(("me", "", body if not emg or body.upper().startswith("DARURAT") else "DARURAT - " + body, t, emg))
+            else:
+                items.append(("them", "Support" + (" · %s" % m["author"] if m.get("author") else ""), body, t, False))
         for m in pend:
-            out.append("…  Anda (mengirim):\r\n" + m["text"].replace("\n", "\r\n"))
-        if not out:
-            out.append("Belum ada pesan.\r\nTulis pesan untuk Tim Support di bawah, lalu tekan Enter.")
-        return "\r\n\r\n".join(out)
+            items.append(("pend", "", m["text"].replace("\r", "").strip() or " ", "mengirim…", False))
+        return items
 
+    def log_layout(self):
+        u, g, s, W = self.u, self.g, self.s, self.W
+        rc = W.RECT()
+        u.GetClientRect(self.h_log, ctypes.byref(rc))
+        cw, page = rc.right, rc.bottom
+        stick = self.scroll + page >= self.log_h - s(30)                          # sedang di bawah: ikut turun ke pesan baru
+        px, py, side_m = s(11), s(7), s(10)
+        hdc = u.GetDC(self.h_log)
+        old = g.SelectObject(hdc, self.f_ui)
+        lay, y = [], s(10)
+        for side, name, text, t, emg in self.items or []:
+            font = self.f_bold if emg else (self.f_small if side == "sys" else self.f_ui)
+            inner = max(s(80), (cw - s(70)) if side == "sys" else int(cw * 0.74) - 2 * px)
+            g.SelectObject(hdc, font)
+            r = W.RECT(0, 0, inner, 0)
+            u.DrawTextW(hdc, text, -1, ctypes.byref(r), 0x400 | 0x10 | 0x800 | 0x2000)     # CALCRECT|WORDBREAK|NOPREFIX|EDITCONTROL
+            tw, th, nw, nh = r.right, r.bottom, 0, 0
+            if name:
+                g.SelectObject(hdc, self.f_name)
+                r2 = W.RECT(0, 0, inner, 0)
+                u.DrawTextW(hdc, name, -1, ctypes.byref(r2), 0x400 | 0x20 | 0x800)       # CALCRECT|SINGLELINE|NOPREFIX
+                nw, nh = min(r2.right, inner), r2.bottom + s(2)
+            bw, bh = max(tw, nw, s(36)) + 2 * px, th + nh + 2 * py
+            x = (cw - bw) // 2 if side == "sys" else (cw - side_m - bw if side in ("me", "pend") else side_m)
+            lay.append((x, y, bw, bh, side, name, text, t, emg, nh, font))
+            y += bh + s(16) + s(6)                                                # baris jam di bawah bubble + jarak
+        g.SelectObject(hdc, old)
+        u.ReleaseDC(self.h_log, hdc)
+        self.lay, self.log_h = lay, y
+        self.log_scroll(max(0, y - page) if stick else self.scroll, force=True)
+
+    def log_scroll(self, pos, force=False):
+        u, W = self.u, self.W
+        rc = W.RECT()
+        u.GetClientRect(self.h_log, ctypes.byref(rc))
+        pos = max(0, min(int(pos), max(0, self.log_h - rc.bottom)))
+        if pos == self.scroll and not force:
+            return
+        self.scroll = pos
+        si = self.SCROLLINFO(cbSize=ctypes.sizeof(self.SCROLLINFO), fMask=0x1 | 0x2 | 0x4, nMin=0, nMax=max(0, self.log_h - 1), nPage=rc.bottom, nPos=pos)
+        u.SetScrollInfo(self.h_log, 1, ctypes.byref(si), True)                    # SB_VERT
+        u.InvalidateRect(self.h_log, None, False)
+
+    def log_paint(self, hwnd):
+        u, g, s, W = self.u, self.g, self.s, self.W
+        ps = self.PAINTSTRUCT()
+        hdc = u.BeginPaint(hwnd, ctypes.byref(ps))
+        rc = W.RECT()
+        u.GetClientRect(hwnd, ctypes.byref(rc))
+        w, h = rc.right, rc.bottom
+        mdc = g.CreateCompatibleDC(hdc)                                           # digambar di memori dulu: tidak berkedip
+        bmp = g.CreateCompatibleBitmap(hdc, max(1, w), max(1, h))
+        obmp = g.SelectObject(mdc, bmp)
+        br = g.CreateSolidBrush(self.C_BG)
+        u.FillRect(mdc, ctypes.byref(rc), br)
+        g.DeleteObject(br)
+        g.SetBkMode(mdc, 1)
+        ofont = g.SelectObject(mdc, self.f_ui)
+        px, py = s(11), s(7)
+        if not self.lay:
+            g.SetTextColor(mdc, self.C_TIME)
+            r = W.RECT(s(20), h // 2 - s(30), w - s(20), h // 2 + s(30))
+            u.DrawTextW(mdc, "Belum ada pesan.\nTulis pesan untuk Tim Support di bawah, lalu tekan Enter.", -1, ctypes.byref(r), 0x1 | 0x10 | 0x800)
+        for x, y, bw, bh, side, name, text, t, emg, nh, font in self.lay:
+            y -= self.scroll
+            if y > h or y + bh + s(20) < 0:
+                continue
+            if side == "sys":
+                fill, line, tc = self.C_SYS, self.C_SYS_LINE, self.C_SYS_TEXT
+            elif side == "them":
+                fill, line, tc = self.C_THEM, self.C_THEM_LINE, self.C_TEXT
+            else:
+                fill = self.C_EMG if emg else (self.C_PEND if side == "pend" else self.C_ME)
+                line, tc = fill, 0xFFFFFF
+            b, p = g.CreateSolidBrush(fill), g.CreatePen(0, 1, line)
+            ob, op = g.SelectObject(mdc, b), g.SelectObject(mdc, p)
+            g.RoundRect(mdc, x, y, x + bw, y + bh, s(18), s(18))
+            g.SelectObject(mdc, ob), g.SelectObject(mdc, op)
+            g.DeleteObject(b), g.DeleteObject(p)
+            if name:
+                g.SelectObject(mdc, self.f_name)
+                g.SetTextColor(mdc, self.C_NAME)
+                r = W.RECT(x + px, y + py, x + bw - px, y + py + nh)
+                u.DrawTextW(mdc, name, -1, ctypes.byref(r), 0x20 | 0x800 | 0x8000)     # SINGLELINE|NOPREFIX|END_ELLIPSIS
+            g.SelectObject(mdc, font)
+            g.SetTextColor(mdc, tc)
+            r = W.RECT(x + px, y + py + nh, x + bw - px, y + bh - py)
+            u.DrawTextW(mdc, text, -1, ctypes.byref(r), 0x10 | 0x800 | 0x2000 | (0x1 if side == "sys" else 0))
+            g.SelectObject(mdc, self.f_small)
+            g.SetTextColor(mdc, self.C_TIME)
+            r = W.RECT(x + s(4), y + bh + s(2), x + bw - s(4), y + bh + s(17))
+            align = 0x1 if side == "sys" else (0x2 if side in ("me", "pend") else 0x0)   # CENTER / RIGHT / LEFT
+            u.DrawTextW(mdc, t, -1, ctypes.byref(r), 0x20 | 0x800 | align)
+        g.SelectObject(mdc, ofont)
+        g.BitBlt(hdc, 0, 0, w, h, mdc, 0, 0, 0x00CC0020)                         # SRCCOPY
+        g.SelectObject(mdc, obmp)
+        g.DeleteObject(bmp)
+        g.DeleteDC(mdc)
+        u.EndPaint(hwnd, ctypes.byref(ps))
+
+    def log_proc(self, hwnd, msg, wp, lp):
+        try:
+            if msg == 0x0F:                                                      # WM_PAINT
+                self.log_paint(hwnd)
+                return 0
+            if msg == 0x14:                                                      # WM_ERASEBKGND: digambar sendiri
+                return 1
+            if msg == 0x115:                                                     # WM_VSCROLL
+                code, rc = wp & 0xFFFF, self.W.RECT()
+                self.u.GetClientRect(hwnd, ctypes.byref(rc))
+                if code in (4, 5):                                               # THUMBPOSITION / THUMBTRACK
+                    si = self.SCROLLINFO(cbSize=ctypes.sizeof(self.SCROLLINFO), fMask=0x10)
+                    self.u.GetScrollInfo(hwnd, 1, ctypes.byref(si))
+                    self.log_scroll(si.nTrackPos)
+                else:
+                    step = {0: -self.s(40), 1: self.s(40), 2: -rc.bottom, 3: rc.bottom, 6: -10 ** 6, 7: 10 ** 6}.get(code, 0)
+                    self.log_scroll(self.scroll + step)
+                return 0
+            if msg == 0x20A:                                                     # WM_MOUSEWHEEL
+                self.log_scroll(self.scroll - ctypes.c_short((wp >> 16) & 0xFFFF).value * self.s(60) // 120)
+                return 0
+            if msg == 0x5 and self.items is not None:                            # WM_SIZE
+                self.log_layout()
+        except Exception:
+            log.exception("support: riwayat chat")
+        return self.u.DefWindowProcW(hwnd, msg, wp, lp)
     def refresh(self):
         u = self.u
         if not _sup["on"]:
@@ -1563,12 +1705,10 @@ class SupportUI:
             u.MessageBeep(0x40)                                                  # pesan baru dari support (jendela chat tertutup)
         self.beeped = max(self.beeped, _sup["max"])
         if _sup["visible"]:
-            txt = self.transcript()
-            if txt != self.log_text:
-                self.log_text = txt
-                u.SetWindowTextW(self.h_log, txt)
-                u.SendMessageW(self.h_log, 0xB1, len(txt), len(txt))               # EM_SETSEL ke akhir
-                u.SendMessageW(self.h_log, 0xB7, 0, 0)                             # EM_SCROLLCARET
+            items = self.chat_items()
+            if items != self.items:
+                self.items = items
+                self.log_layout()
             st = _sup["status"]
             if _sup["emg"] == "open":
                 st = "DARURAT terkirim, menunggu support…" + ("" if st.startswith("Darurat") or not st else "  ·  " + st)
@@ -1587,7 +1727,7 @@ class SupportUI:
             if _sup["seen"] < _sup["max"]:
                 _sup["seen"] = _sup["max"]
                 _sup_save()
-        self.log_text = None
+        self.items = None
         self.refresh()
         u.ShowWindow(self.chat, 5)                                               # SW_SHOW
         u.SetForegroundWindow(self.chat)
@@ -1660,6 +1800,9 @@ class SupportUI:
 
     def chat_proc(self, hwnd, msg, wp, lp):
         try:
+            if msg == 0x20A:                                                     # WM_MOUSEWHEEL -> riwayat chat
+                self.u.SendMessageW(self.h_log, msg, wp, lp)
+                return 0
             if msg == 0x111:                                                     # WM_COMMAND
                 cid = wp & 0xFFFF
                 if cid == self.ID_SEND:
