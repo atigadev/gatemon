@@ -49,4 +49,4 @@ topbar('index', 'Monitoring Laptop');
 </main>
 
 <div class="modal" id="modal" hidden><div class="modal-box"><h3 id="m-title"></h3><div id="m-body"></div><div class="actions"><button class="btn" id="m-cancel">Tutup</button><button class="btn btn-primary" id="m-ok">Kirim</button></div></div></div>
-<?php page_foot(['alerts.js?v=3', 'app.js?v=17']);
+<?php page_foot(['alerts.js?v=3', 'app.js?v=18']);

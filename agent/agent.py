@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.16.0"
+VERSION = "1.17.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -2204,6 +2204,47 @@ def install_uninstaller():
             log.warning("uninstaller %s tidak bisa ditulis: %s", name, e)
 
 
+# ---------- uninstall dari server (agent >= 1.17) ----------
+# Perintah UNINSTALL (supervisor + password di server). Uninstaller TIDAK dijalankan sebagai proses anak agent: langkah
+# pertamanya menghentikan tugas GateMonAgent, yang ikut mematikan proses turunan agent. Jadi agent membuat tugas Windows
+# sekali-jalan (user yang sama, hak tertinggi) yang menjalankan salinan uninstaller di TEMP setelah jeda 5 detik (waktu
+# untuk melapor ke server), lalu tugas itu menghapus dirinya. Catatan uninstall: %TEMP%\gatemon-uninstall.log
+UNINSTALL_TASK = "GateMonUninstall"
+
+
+def uninstall_start():
+    if not IS_WIN:
+        raise RuntimeError("uninstall dari server hanya untuk Windows")
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        raise RuntimeError("agent tidak berjalan sebagai Administrator; jalankan uninstall_agent.bat di laptop")
+    install_uninstaller()                                  # pastikan uninstaller terbaru ada di folder agent
+    src = os.path.join(BASE, "uninstall_agent.ps1")
+    if not os.path.isfile(src):
+        raise RuntimeError("uninstall_agent.ps1 tidak ada di folder agent")
+    tmp = os.environ.get("TEMP") or os.environ.get("TMP") or os.path.expanduser("~")
+    ps = os.path.join(tmp, "gatemon-uninstall.ps1")
+    run = os.path.join(tmp, "gatemon-uninstall-run.ps1")
+    q = lambda p: "'" + p.replace("'", "''") + "'"         # string PowerShell berpetik tunggal
+    shutil.copyfile(src, ps)
+    wrapper = "\r\n".join([
+        "Start-Sleep -Seconds 5",
+        "& %s -Dir %s -Yes *> %s" % (q(ps), q(BASE), q(os.path.join(tmp, "gatemon-uninstall.log"))),
+        "schtasks.exe /Delete /TN %s /F | Out-Null" % UNINSTALL_TASK,
+        "Remove-Item -LiteralPath %s, $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue" % q(ps),
+    ]) + "\r\n"
+    with open(run, "w", encoding="utf-8-sig") as fh:        # BOM: PowerShell 5.1 membaca path non-ASCII dengan benar
+        fh.write(wrapper)
+    tr = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "%s"' % run
+    _run(["schtasks", "/Create", "/TN", UNINSTALL_TASK, "/TR", tr, "/SC", "ONCE", "/ST", "23:59", "/RL", "HIGHEST", "/F"])
+    try:
+        _run(["schtasks", "/Run", "/TN", UNINSTALL_TASK])
+    except Exception:                                      # jangan tinggalkan tugas yang akan jalan sendiri pukul 23:59
+        subprocess.run(["schtasks", "/Delete", "/TN", UNINSTALL_TASK, "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        raise
+    log.warning("UNINSTALL: uninstaller dijalankan lewat tugas %s; agent berhenti", UNINSTALL_TASK)
+
+
 # ---------- pindah server (agent >= 1.13) ----------
 # Perintah SET_SERVER dari server lama: agent menguji dulu server baru dengan ID + token-nya (api/ping.php, harus
 # sudah berisi database yang sama). Berhasil -> hasil dilaporkan ke server LAMA, lalu config.json diganti. Server lama
@@ -2358,6 +2399,16 @@ def main():
                         report(cmd["id"], "done", "server baru tersambung, laptop pindah ke " + new)
                         set_server_apply(new)
                         break                                    # perintah lain diambil dari server baru
+                    if cmd["type"] == "UNINSTALL":               # uninstaller jalan 5 detik lagi: lapor lalu berhenti
+                        try:
+                            uninstall_start()
+                        except Exception as e:
+                            log.exception("uninstall gagal dimulai")
+                            report(cmd["id"], "failed", str(e))
+                            continue
+                        report(cmd["id"], "done", "uninstall dimulai di " + socket.gethostname() + "; agent berhenti dan folder agent dihapus")
+                        logging.shutdown()                       # lepas agent.log agar folder bisa dihapus
+                        os._exit(0)
                     try:
                         report(cmd["id"], "done", run_command(cmd))
                     except Exception as e:

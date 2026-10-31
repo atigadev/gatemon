@@ -500,6 +500,8 @@ input[type=range]:focus{box-shadow:none}
 .sb.ok b{color:var(--ok)}.sb.be b{color:var(--warn)}.sb.nf b{color:var(--bad)}.sb.er b{color:var(--muted)}
 .chip.scan b{margin-left:6px}.chip.scan b.ok{color:var(--ok)}.chip.scan b.be{color:var(--warn)}.chip.scan b.nf{color:var(--bad)}
 .scan-box{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.uninst-box{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border:1px dashed color-mix(in srgb,var(--bad) 45%,transparent);border-radius:var(--radius-sm);font-size:13px;color:var(--text-2)}
+.uninst-box span{flex:1;min-width:200px}
 .scan-box h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .scan-box h4 small{font-weight:400;font-size:12px}
 .sc-st{font-size:12px;font-weight:600}.sc-st.success{color:var(--ok)}.sc-st.belum{color:var(--warn)}.sc-st.notfound{color:var(--bad)}.sc-st.error{color:var(--muted)}
@@ -644,6 +646,8 @@ body.sup-page.sup-alarm-on{padding-bottom:0}
 /* ---------- popup notifikasi: di tengah layar, tertutup sendiri setelah 10 detik ---------- */
 .gm-pops{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:70;display:flex;flex-direction:column;gap:14px;
   width:min(620px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:hidden;pointer-events:none}
+/* dialog terbuka: popup pindah ke atas agar tidak menutupi isian dialog */
+body:has(.modal:not([hidden])) .gm-pops{top:16px;transform:translateX(-50%)}
 .gm-pop{--c:var(--primary);pointer-events:auto;position:relative;overflow:hidden;display:flex;gap:18px;align-items:center;padding:22px 56px 26px 24px;border-radius:var(--radius);
   background:var(--surface);color:var(--text);border:2px solid color-mix(in srgb,var(--c) 70%,transparent);border-left:8px solid var(--c);
   box-shadow:0 24px 60px -12px rgba(0,0,0,.55),0 0 46px -6px var(--c);text-decoration:none;animation:gmpopin .3s ease-out;transition:opacity .4s,transform .4s}

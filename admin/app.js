@@ -7,6 +7,7 @@ const OP = SUP || ROLE === 'operator';   // petugas: boleh kirim perintah kecual
 // versi agent a >= b (mis. '1.14.0')
 const verGe = (a, b) => { const x = String(a||'0').split('.').map(Number), y = b.split('.').map(Number); for(let i=0;i<3;i++){ if((x[i]||0)!==(y[i]||0)) return (x[i]||0)>(y[i]||0); } return true; };
 const canLive = d => SUP && verGe(d.agent_version, '1.14.0');   // layar live: agent 1.14+
+const UNINSTALL_MIN = '1.17.0';   // uninstall agent dari server (supervisor)
 const WALL = document.body.classList.contains('wall');
 const $ = id => document.getElementById(id);
 let lastData = null;
@@ -117,11 +118,42 @@ function detailHtml(d){
     ${line('Baterai / uptime', (d.battery==null?'-':d.battery+'%'+(d.battery_plugged?' ⚡':''))+' / '+fmtUp(d.uptime_sec))}
     ${line('Terakhir lapor / agent', esc(d.last_seen||'belum pernah')+' / '+esc(d.agent_version||'-'))}
     ${radmin||cmds ? `<div class="actions">${canLive(d) ? `<a class="btn btn-primary" href="live.php?dev=${d.id}" target="_blank" rel="noopener" title="Lihat layar laptop secara langsung (tanpa Radmin)">Layar live</a>` : ''}${radmin}${cmds}</div>` : ''}
+    ${uninstallBox(d)}
     ${recentCmds(d)}
     ${d.scan_enabled ? `<div class="scan-box"><h4>Scan hari ini <span class="scan-chips">${scanChips(d.scan)}</span>
       ${d.scan&&d.scan.last?`<small class="muted">terakhir ${esc(d.scan.last.slice(11,19))}</small>`:''}</h4>
       <div id="scan-hist">${scanHistHtml(d.id)}</div></div>` : ''}
   </div>`;
+}
+
+// Uninstall agent dari server: hanya supervisor, satu laptop, konfirmasi password (dicek di server)
+function uninstallBox(d){
+  if(!SUP) return '';
+  if(d.uninstall_pending) return `<div class="uninst-box"><span><b>Uninstall agent menunggu dikirim</b> · dijalankan saat laptop online</span><button class="btn" data-uninst-cancel="${d.id}">Batalkan uninstall</button></div>`;
+  if(!verGe(d.agent_version, UNINSTALL_MIN)) return `<p class="muted small">Uninstall dari server perlu agent ${UNINSTALL_MIN}+ (laptop ini ${esc(d.agent_version||'?')}): update lewat menu Agent, atau jalankan uninstall_agent.bat di laptop.</p>`;
+  return `<div class="uninst-box"><span>Lepas GateMon Agent dari laptop ini (folder agent dihapus, perlu pasang ulang untuk memantau lagi).</span><button class="btn btn-danger" data-uninst="${d.id}" data-name="${esc(d.name)}">Uninstall agent</button></div>`;
+}
+async function uninstApi(params){
+  const r = await fetch('uninstall_api.php', {method:'POST', headers:{'X-CSRF':CSRF}, body:new URLSearchParams(Object.assign({csrf:CSRF}, params))});
+  const j = await r.json().catch(()=>({ok:false, error:'HTTP '+r.status}));
+  if(!j.ok) throw new Error(j.error || 'gagal');
+  return j;
+}
+function askUninstall(id, name){
+  openModal(`Uninstall agent → ${name}`, `<p>Agent di laptop <b>${esc(name)}</b> akan <b>dihapus</b>: tugas otomatis dihapus, browser gate ditutup, wallpaper asli dan Windows Update dikembalikan, lalu seluruh folder agent dihapus.</p>
+    <p class="bad">Setelah dijalankan laptop, tidak bisa dibatalkan. Laptop tidak terpantau lagi sampai agent dipasang ulang dengan kode instalasi.</p>
+    <label class="check"><input type="checkbox" id="m-remove"> Sekalian hapus laptop ini dari daftar Devices</label>
+    <p>Password akun Anda:</p><input type="password" id="m-pass" autocomplete="current-password" style="padding:6px;width:220px">`, ()=>{
+    const pass = $('m-pass').value; if(!pass){ alert('Isi password akun Anda'); return false; }
+    const remove = $('m-remove').checked ? '1' : '';
+    mOk.disabled = true;
+    uninstApi({act:'send', dev:id, password:pass, remove}).then(()=>{
+      closeModal(); gmPopup({level:'warn', title:'Uninstall dikirim: '+name, text:'Dijalankan saat laptop mengambil perintah (beberapa detik bila online).'}); refresh();
+    }).catch(err=>alert('Gagal: '+err.message)).finally(()=>{ mOk.disabled = false; });
+    return false;
+  });
+  mOk.textContent = 'Uninstall'; mOk.classList.replace('btn-primary', 'btn-danger');
+  setTimeout(()=>$('m-pass')?.focus(), 50);
 }
 
 // Perintah terakhir untuk laptop ini (agar hasil terlihat juga di layar monitor)
@@ -269,7 +301,7 @@ async function send(type, device_id, payload, category=null){
 
 const modal=$('modal'), mTitle=$('m-title'), mBody=$('m-body'), mOk=$('m-ok');
 function closeModal(){ stopCam(); modal.hidden=true; }
-function openModal(title, bodyHtml, onOk){ stopCam(); detailId=null; modal.querySelector('.modal-box').classList.remove('has-cam'); mTitle.textContent=title; mBody.innerHTML=bodyHtml; mOk.hidden=!onOk; mOk.onclick=()=>{ if(onOk()!==false) closeModal(); }; modal.hidden=false; }
+function openModal(title, bodyHtml, onOk){ stopCam(); detailId=null; modal.querySelector('.modal-box').classList.remove('has-cam'); mTitle.textContent=title; mBody.innerHTML=bodyHtml; mOk.hidden=!onOk; mOk.textContent='Kirim'; mOk.classList.remove('btn-danger'); mOk.classList.add('btn-primary'); mOk.disabled=false; mOk.onclick=()=>{ if(onOk()!==false) closeModal(); }; modal.hidden=false; }
 $('m-cancel').onclick=closeModal;
 modal.addEventListener('click', e=>{ if(e.target===modal) closeModal(); });
 document.addEventListener('keydown', e=>{
@@ -292,6 +324,8 @@ function askAndSend(type, device_id, name){
 
 document.addEventListener('click', e=>{
   const tb=e.target.closest('[data-tab]'); if(tb){ activeTab=tb.dataset.tab; try{ localStorage.setItem('gm_tab',activeTab); }catch(err){} renderDevices(); return; }
+  const u=e.target.closest('[data-uninst]'); if(u){ askUninstall(u.dataset.uninst, u.dataset.name); return; }
+  const uc=e.target.closest('[data-uninst-cancel]'); if(uc){ uc.disabled=true; uninstApi({act:'cancel', dev:uc.dataset.uninstCancel}).then(()=>{ gmPopup({level:'ok', title:'Uninstall dibatalkan', text:'Agent tetap terpasang.'}); refresh(); }).catch(err=>{ alert('Gagal: '+err.message); uc.disabled=false; }); return; }
   const b=e.target.closest('[data-cmd]'); if(b){ askAndSend(b.dataset.cmd, b.dataset.id, b.dataset.name); return; }
   const a=e.target.closest('[data-all]'); if(a){ askAndSend(a.dataset.all, 'all', null); return; }
   const c=e.target.closest('[data-copy]'); if(c){ navigator.clipboard?.writeText(c.dataset.copy); c.textContent='IP disalin'; setTimeout(()=>c.textContent='Salin IP',1500); return; }

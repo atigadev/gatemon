@@ -17,6 +17,8 @@ foreach ($pdo->query("SELECT device_id, SUM(status='success') ok, SUM(status='be
     $scan[$r['device_id']] = ['ok' => (int)$r['ok'], 'belum' => (int)$r['belum'], 'nf' => (int)$r['nf'], 'err' => (int)$r['err'],
         'last' => $r['last'], 'nf_1m' => (int)$r['nf_1m']];
 }
+// uninstall yang menunggu diambil laptop (masih bisa dibatalkan)
+$uninst = array_flip($pdo->query("SELECT device_id FROM commands WHERE type='UNINSTALL' AND status='pending'")->fetchAll(PDO::FETCH_COLUMN));
 $scan_total = ['ok' => 0, 'belum' => 0, 'nf' => 0, 'err' => 0];
 foreach ($devices as &$d) {
     // data scan hanya untuk "laptop scan" (URL halaman gate cocok pola di menu Pengaturan)
@@ -26,6 +28,7 @@ foreach ($devices as &$d) {
     $d['state'] = device_state($d, $off);
     $d['age'] = $d['last_seen'] ? time() - strtotime($d['last_seen']) : null;
     $d['camera_link'] = camera_link($d);
+    $d['uninstall_pending'] = isset($uninst[$d['id']]);
     $d['gate_urls'] = gate_urls_of($d);
     $d['wol_info'] = wol_summary($d);                         // kesiapan Wake-on-LAN
     $d['nics'] = json_decode((string)$d['nics'], true) ?: [];

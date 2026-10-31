@@ -48,7 +48,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
        . '<meta name="color-scheme" content="dark light">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=34">'
+       . '<link rel="stylesheet" href="style.css?v=35">'
        . '<script nonce="' . csp_nonce() . '">(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
@@ -100,7 +100,7 @@ function page_foot($scripts = []) {
     echo '<script src="ui.js?v=7"></script>';
     // alarm darurat & pesan baru dari laptop (menu Support) di semua halaman setelah login
     if (function_exists('current_user') && ($u = current_user())) {
-        echo '<script src="support_alert.js?v=4" data-csrf="' . csrf_token() . '" data-role="' . h($u['role']) . '"></script>';
+        echo '<script src="support_alert.js?v=5" data-csrf="' . csrf_token() . '" data-role="' . h($u['role']) . '"></script>';
     }
     foreach ($scripts as $s) echo '<script src="' . h($s) . '"></script>';
     echo '</body></html>';

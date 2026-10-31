@@ -74,7 +74,7 @@
       const last = j.last;
       if(last && lastId !== null && +last.id > lastId && !emg.some(e => +e.device_id === +last.device_id && +e.id === +last.id)){
         const here = onSupport && new URL(location.href).searchParams.get('dev') == last.device_id;
-        if(!here){ chime(); if(window.gmPopup) gmPopup({level: 'info', title: '💬 Pesan dari ' + last.name, text: last.body.slice(0, 140), href: 'support.php?dev=' + last.device_id}); }
+        if(!here){ chime(); setTimeout(() => say('Ada pesan masuk dari ' + (window.speakName ? speakName(last.name) : last.name) + '.'), 700); if(window.gmPopup) gmPopup({level: 'info', title: '💬 Pesan dari ' + last.name, text: last.body.slice(0, 140), href: 'support.php?dev=' + last.device_id}); }
       }
       if(last) lastId = Math.max(lastId || 0, +last.id); else if(lastId === null) lastId = 0;
     }catch(e){}

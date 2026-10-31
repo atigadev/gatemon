@@ -337,6 +337,9 @@ function policy_cfg() {
 }
 const POLICY_MIN = '1.10.0';   // agent mulai versi ini menerapkan kebijakan daya & Windows Update
 
+// ---------- uninstall agent dari server (agent >= 1.17) ----------
+const UNINSTALL_MIN = '1.17.0';
+
 // ---------- layar live (agent >= 1.14) ----------
 const LIVE_MIN = '1.14.0';
 const LIVE_MAX_MINUTES = 30;          // satu sesi paling lama ini, lalu penonton harus klik "Lanjutkan"
