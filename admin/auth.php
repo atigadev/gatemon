@@ -39,14 +39,28 @@ function session_login(array $a, $must_change) {
 }
 session_check();
 
+// Peran akun dashboard:
+//   viewer     = hanya melihat
+//   operator   = "Petugas": kirim perintah ke agent (kecuali reboot/shutdown), balas chat & tangani darurat,
+//                buat kode instalasi agent; TIDAK bisa menambah/mengubah/menghapus laptop atau pengaturan
+//   supervisor = semua
+const ROLES = ['viewer' => 'Viewer (hanya melihat)', 'operator' => 'Petugas (perintah, chat, kode instalasi)', 'supervisor' => 'Supervisor (semua akses)'];
+const ROLE_NAMES = ['viewer' => 'viewer', 'operator' => 'petugas', 'supervisor' => 'supervisor'];
+const OPERATOR_DENY_CMDS = ['REBOOT', 'SHUTDOWN'];
 function current_user() { return $_SESSION['user'] ?? null; }
 function is_supervisor() { return (current_user()['role'] ?? '') === 'supervisor'; }
+function is_operator() { return in_array(current_user()['role'] ?? '', ['operator', 'supervisor'], true); }   // petugas atau supervisor
+function can_command($type) { return is_supervisor() || (is_operator() && !in_array($type, OPERATOR_DENY_CMDS, true)); }
 function require_login() {
     if (!current_user()) { header('Location: login.php'); exit; }
 }
 function require_supervisor_json() {
     if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
-    if (!is_supervisor()) json_out(['ok' => false, 'error' => 'hanya supervisor yang boleh mengirim perintah'], 403);
+    if (!is_supervisor()) json_out(['ok' => false, 'error' => 'hanya supervisor yang boleh melakukan ini'], 403);
+}
+function require_operator_json() {
+    if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
+    if (!is_operator()) json_out(['ok' => false, 'error' => 'akun viewer hanya bisa melihat'], 403);
 }
 function csrf_token() {
     if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));

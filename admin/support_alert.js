@@ -2,7 +2,7 @@
 // Darurat: banner merah + sirene berulang + kalimat dibacakan sampai ditangani (atau didiamkan di browser ini).
 // Berbunyi walau suara peringatan lain dimatikan. Browser baru mengizinkan suara setelah halaman diklik sekali.
 (function(){
-  const me = document.currentScript, CSRF = me.dataset.csrf, SUP = me.dataset.role === 'supervisor';
+  const me = document.currentScript, CSRF = me.dataset.csrf, SUP = ['supervisor', 'operator'].includes(me.dataset.role);   // boleh menangani darurat
   const KEY = 'gm_sup_quiet';               // id darurat yang didiamkan di browser ini
   const onSupport = !!document.getElementById('sup');
   let quiet = load(), emg = [], lastId = null, ctx = null, nextSay = 0, stopped = false;

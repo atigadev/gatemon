@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (is_supervisor() && !$must && $act === 'add') {
         $u = trim((string)($_POST['username'] ?? ''));
         $p = (string)($_POST['password'] ?? '');
-        $role = ($_POST['role'] ?? '') === 'supervisor' ? 'supervisor' : 'viewer';
+        $role = isset(ROLES[$_POST['role'] ?? '']) ? $_POST['role'] : 'viewer';
         if (!preg_match('/^[A-Za-z0-9._-]{3,50}$/', $u)) $msg = 'Username tidak valid: 3-50 karakter huruf, angka, titik, minus, garis bawah.';
         elseif (($pp = password_problem($p, $u)) !== '') $msg = 'Password tidak valid: ' . $pp;
         else {
@@ -58,6 +58,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_event(null, 'warn', "{$me['username']} mereset password akun $name");
             $msg = "Password $name direset. Berikan password sementara secara langsung; $name wajib menggantinya saat login.";
         }
+    } elseif (is_supervisor() && !$must && $act === 'role') {
+        // ubah peran akun lain (berlaku langsung: peran dibaca ulang dari database setiap request)
+        $id = (int)($_POST['id'] ?? 0);
+        $role = (string)($_POST['role'] ?? '');
+        $st = $pdo->prepare("SELECT username, role FROM admins WHERE id=?");
+        $st->execute([$id]);
+        $t = $st->fetch();
+        if (!$t || !isset(ROLES[$role])) $msg = 'Akun / peran tidak valid.';
+        elseif ($id === (int)$me['id']) $msg = 'Tidak bisa mengubah peran akun sendiri.';
+        elseif ($t['role'] === 'supervisor' && $role !== 'supervisor' && $sup_count <= 1) $msg = 'Tidak bisa menurunkan supervisor terakhir.';
+        else {
+            $pdo->prepare("UPDATE admins SET role=? WHERE id=?")->execute([$role, $id]);
+            log_event(null, 'warn', "{$me['username']} mengubah peran akun {$t['username']}: {$t['role']} -> $role");
+            $msg = "Peran {$t['username']} diubah menjadi " . ROLE_NAMES[$role] . '.';
+        }
     } elseif (is_supervisor() && !$must && $act === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         $st = $pdo->prepare("SELECT username, role FROM admins WHERE id=?");
@@ -81,7 +96,7 @@ topbar('admins', 'Monitoring Laptop');
 $rule = 'Minimal 10 karakter, tidak memuat username atau kata umum (password, admin123, qwerty, …).';
 ?>
 <main class="page">
-  <div class="page-head"><div><h1>Admins</h1><p class="muted">Akun yang bisa masuk ke dashboard. Viewer hanya melihat, supervisor boleh mengirim perintah.</p></div></div>
+  <div class="page-head"><div><h1>Admins</h1><p class="muted">Akun yang bisa masuk ke dashboard. Viewer hanya melihat; petugas boleh mengirim perintah (kecuali reboot/shutdown), membalas chat, dan membuat kode instalasi; supervisor semua akses.</p></div></div>
 <?php if ($must): ?><p class="notice error"><b>Wajib ganti password.</b> Password akun ini terlalu lemah atau baru direset supervisor. Menu lain terbuka setelah password diganti.</p><?php endif; ?>
 <?= flash($msg) ?>
 <section class="card">
@@ -103,7 +118,7 @@ $rule = 'Minimal 10 karakter, tidak memuat username atau kata umum (password, ad
     <input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="add">
     <label>Username <input name="username" required pattern="[A-Za-z0-9._\-]{3,50}" maxlength="50" autocomplete="off"></label>
     <label>Password <input type="password" name="password" required minlength="10" maxlength="200" autocomplete="new-password"></label>
-    <label>Peran <select name="role"><option value="viewer">Viewer (hanya melihat)</option><option value="supervisor">Supervisor (boleh kirim perintah)</option></select></label>
+    <label>Peran <select name="role"><?php foreach (ROLES as $k => $l): ?><option value="<?= $k ?>"><?= h($l) ?></option><?php endforeach; ?></select></label>
     <button class="btn btn-primary">Tambah</button>
   </form>
   <p class="muted small"><?= h($rule) ?></p>
@@ -116,11 +131,13 @@ $rule = 'Minimal 10 karakter, tidak memuat username atau kata umum (password, ad
     <tr><th>Username</th><th>Peran</th><th>Login terakhir</th><th>Password diganti</th><?php if (is_supervisor()): ?><th></th><?php endif; ?></tr>
     <?php foreach ($admins as $a): ?>
     <tr><td><?= h($a['username']) ?><?= (int)$a['must_change'] === 1 ? ' <span class="badge">wajib ganti password</span>' : '' ?></td>
-      <td><span class="badge<?= $a['role'] === 'supervisor' ? ' sup' : '' ?>"><?= h($a['role']) ?></span></td>
+      <td><span class="badge<?= $a['role'] === 'supervisor' ? ' sup' : ($a['role'] === 'operator' ? ' op' : '') ?>"><?= h(ROLE_NAMES[$a['role']] ?? $a['role']) ?></span></td>
       <td class="muted"><?= $a['last_login_at'] ? h($a['last_login_at']) . ' · ' . h($a['last_login_ip']) : 'belum pernah' ?></td>
       <td class="muted"><?= $a['pw_changed_at'] ? h($a['pw_changed_at']) : '–' ?></td>
     <?php if (is_supervisor()): ?><td class="actions">
       <?php if ((int)$a['id'] !== (int)$me['id']): ?>
+      <form method="post" class="inline-form"><input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="role"><input type="hidden" name="id" value="<?= (int)$a['id'] ?>">
+        <select name="role" aria-label="Peran <?= h($a['username']) ?>"><?php foreach (ROLE_NAMES as $k => $l): ?><option value="<?= $k ?>"<?= $a['role'] === $k ? ' selected' : '' ?>><?= ucfirst($l) ?></option><?php endforeach; ?></select><button class="btn">Ubah peran</button></form>
       <form method="post" class="inline-form" data-confirm="Reset password <?= h($a['username']) ?>? Semua sesinya akan keluar."><input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="reset"><input type="hidden" name="id" value="<?= (int)$a['id'] ?>">
         <input type="password" name="password" required minlength="10" maxlength="200" placeholder="Password sementara" autocomplete="new-password" aria-label="Password sementara untuk <?= h($a['username']) ?>"><button class="btn">Reset</button></form>
       <form method="post" class="inline-form"><input type="hidden" name="csrf" value="<?= $csrf ?>"><input type="hidden" name="act" value="delete"><input type="hidden" name="id" value="<?= (int)$a['id'] ?>"><button class="btn btn-danger" data-confirm="Hapus akun <?= h($a['username']) ?>?">Hapus</button></form>

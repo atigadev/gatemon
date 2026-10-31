@@ -1,12 +1,13 @@
 <?php
-// Supervisor mengirim perintah ke satu laptop atau semua laptop.
+// Supervisor / petugas mengirim perintah ke satu laptop atau semua laptop (petugas: tanpa reboot/shutdown).
 require __DIR__ . '/auth.php';
-require_supervisor_json();
+require_operator_json();
 check_csrf();
 $b = json_in();
 $allowed = ['PING', 'MESSAGE', 'OPEN_GATE', 'RESTART_BROWSER', 'SCREENSHOT', 'LOCK', 'SLEEP', 'REBOOT', 'SHUTDOWN', 'WAKE'];
 $type = strtoupper(trim($b['type'] ?? ''));
 if (!in_array($type, $allowed, true)) json_out(['ok' => false, 'error' => 'perintah tidak dikenal'], 400);
+if (!can_command($type)) json_out(['ok' => false, 'error' => 'reboot / shutdown hanya boleh dilakukan supervisor'], 403);
 $payload = isset($b['payload']) ? mb_substr((string)$b['payload'], 0, 500) : null;
 $target = $b['device_id'] ?? '';
 

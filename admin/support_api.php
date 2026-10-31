@@ -3,7 +3,7 @@
 // GET  act=alert                 -> darurat yang belum ditangani + jumlah pesan belum dibaca (dipolling semua halaman admin)
 // GET  act=convs                 -> daftar percakapan per laptop
 // GET  act=thread&dev=ID&since=  -> pesan baru satu laptop (pesan dari laptop ditandai dibaca)
-// POST act=send (dev, text) / act=ack (dev) / act=mode (dev, mode) / act=show (dev, chat) / act=show_all   -> supervisor + CSRF
+// POST act=send (dev, text) / act=ack (dev) / act=mode (dev, mode) / act=show (dev, chat) / act=show_all   -> CSRF; send & ack: petugas/supervisor, lainnya supervisor
 require __DIR__ . '/auth.php';
 if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
 $pdo = db();
@@ -25,7 +25,8 @@ function sup_device($id) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    require_supervisor_json();
+    // balas chat & tangani darurat: petugas juga boleh; atur/tampilkan tombol di laptop: supervisor saja
+    in_array($act, ['send', 'ack'], true) ? require_operator_json() : require_supervisor_json();
     check_csrf();
     $who = current_user()['username'];
     $cmd = $pdo->prepare("INSERT INTO commands (device_id, type, payload, status, created_by, created_at) VALUES (?, 'SUPPORT_SHOW', ?, 'pending', ?, NOW())");

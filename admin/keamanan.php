@@ -51,7 +51,7 @@ $add('Konfigurasi', 'Folder wallpaper bisa ditulis', is_writable("$root/wallpape
 // ---------- akun ----------
 $adm = $pdo->query("SELECT username, role, must_change, pw_changed_at, last_login_at FROM admins")->fetchAll();
 $sup = array_filter($adm, function ($a) { return $a['role'] === 'supervisor'; });
-$add('Akun', 'Jumlah supervisor', count($sup) >= 1 && count($sup) <= 3 ? 'ok' : 'warn', count($sup) . ' supervisor, ' . (count($adm) - count($sup)) . ' viewer');
+$add('Akun', 'Jumlah supervisor', count($sup) >= 1 && count($sup) <= 3 ? 'ok' : 'warn', count($sup) . ' supervisor, ' . (count($adm) - count($sup)) . ' petugas/viewer');
 foreach ($adm as $a) {
     if ((int)$a['must_change'] === 1) $add('Akun', "Akun {$a['username']}", 'warn', 'wajib ganti password saat login berikutnya');
     elseif (!$a['pw_changed_at']) $add('Akun', "Akun {$a['username']}", 'warn', 'password belum pernah diganti sejak aturan password baru; bila lemah, akan dipaksa ganti saat login');

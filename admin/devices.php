@@ -1,5 +1,5 @@
 <?php
-// Daftar laptop + token untuk agent. Tambah/edit/hapus hanya oleh supervisor.
+// Daftar laptop + token untuk agent. Tambah/edit/hapus hanya oleh supervisor; petugas hanya membuat/membatalkan kode instalasi.
 require __DIR__ . '/auth.php';
 require_login();
 $pdo = db();
@@ -56,9 +56,9 @@ function cat_select($form, $cur, $ro) {
     }
     return '<select name="category_id"' . ($form ? ' form="' . $form . '"' : '') . '>' . $o . '</select>';
 }
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
+$act = $_POST['act'] ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (is_supervisor() || (is_operator() && in_array($act, ['enroll', 'enroll_cancel'], true)))) {
     if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
-    $act = $_POST['act'] ?? '';
     if ($act === 'add') {
         $key = strtoupper(trim($_POST['device_key']));
         if ($key === '' || !preg_match('/^[A-Z0-9_-]{1,50}$/', $key)) { $msg = 'ID laptop hanya huruf/angka, contoh G003.'; $form_err = $_POST; }
@@ -120,6 +120,7 @@ $devices = $pdo->query("SELECT d.*, c.name AS category_name, c.color AS category
     LEFT JOIN categories c ON c.id=d.category_id ORDER BY c.id IS NULL, c.sort, c.name, d.gate, d.name")->fetchAll();
 $csrf = csrf_token();
 $sup = is_supervisor();
+$op = is_operator();   // petugas: kolom Instalasi + tombol kode instalasi saja
 $host = $_SERVER['HTTP_HOST'];
 // Dibuka dari localhost: ganti dengan IP LAN agar bisa dipakai laptop gate
 if (preg_match('/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i', $host, $m)) {
@@ -161,6 +162,8 @@ topbar('devices', 'Monitoring Laptop');
     <button class="btn" name="id" value="all" <?= $devices ? '' : 'disabled' ?> title="Satu folder per laptop, config.json berisi token"><?= icon('download') ?> ZIP per laptop</button>
   </form>
 </section>
+<?php elseif ($op): ?>
+<p class="notice">Pasang / pasang ulang agent: klik tombol <b>Kode instalasi</b> (ikon masuk) pada laptop, lalu di laptop tersebut buka <code><?= h($server_url) ?>/install/ID-LAPTOP</code> dan masukkan username &amp; password sekali pakai. Menambah / mengubah / menghapus laptop hanya oleh supervisor.</p>
 <?php else: ?>
 <p class="muted">URL server untuk <code>config.json</code> agent: <code><?= h($server_url) ?></code></p>
 <?php endif; ?>
@@ -181,7 +184,7 @@ topbar('devices', 'Monitoring Laptop');
   <div class="empty"><?= icon('devices', 'ic big') ?><p>Belum ada laptop.<?= $sup ? ' Klik <b>Tambah laptop</b> untuk mulai.' : '' ?></p></div>
   <?php else: ?>
   <div class="table-wrap"><table class="table dev-table" id="dev-table">
-    <thead><tr><th>Laptop</th><th>Kategori</th><th>Gate / pos</th><th>Mode</th><th>Status</th><th>IP</th><th>Terakhir lapor</th><?php if ($sup): ?><th>Instalasi</th><th>Token agent</th><th class="right">Aksi</th><?php endif; ?></tr></thead>
+    <thead><tr><th>Laptop</th><th>Kategori</th><th>Gate / pos</th><th>Mode</th><th>Status</th><th>IP</th><th>Terakhir lapor</th><?php if ($op): ?><th>Instalasi</th><?php endif; ?><?php if ($sup): ?><th>Token agent</th><?php endif; ?><?php if ($op): ?><th class="right">Aksi</th><?php endif; ?></tr></thead>
     <tbody>
     <?php foreach ($devices as $d):
         $st = device_state($d, setting('offline_after'));
@@ -199,7 +202,7 @@ topbar('devices', 'Monitoring Laptop');
       <td data-label="Status"><span class="state <?= $st ?>"><i></i><?= STATE_LABEL[$st] ?></span></td>
       <td data-label="IP"><?= $d['ip'] ? '<code>' . h($d['ip']) . '</code>' : '<span class="muted">–</span>' ?></td>
       <td data-label="Terakhir lapor" class="muted" title="<?= h($d['last_seen'] ?? '') ?>"><?= ago($d['last_seen']) ?></td>
-      <?php if ($sup):
+      <?php if ($op):
         $code_active = $d['enroll_hash'] && $d['enroll_fail'] < 5 && strtotime($d['enroll_expires']) > time();
       ?>
       <td data-label="Instalasi"><?php
@@ -209,14 +212,14 @@ topbar('devices', 'Monitoring Laptop');
         elseif ($d['enrolled_at']) echo '<span class="badge ok-badge" title="Dipasang ' . h($d['enrolled_at']) . ($d['enrolled_host'] ? ' di ' . h($d['enrolled_host']) : '') . '">Terpasang ' . date('d/m H:i', strtotime($d['enrolled_at'])) . '</span>';
         else echo '<span class="muted">–</span>';
       ?></td>
-      <td data-label="Token"><button type="button" class="token-btn" data-token="<?= h($d['token']) ?>" title="Klik untuk tampilkan dan salin">••••••••</button></td>
+      <?php if ($sup): ?><td data-label="Token"><button type="button" class="token-btn" data-token="<?= h($d['token']) ?>" title="Klik untuk tampilkan dan salin">••••••••</button></td><?php endif; ?>
       <td data-label="Aksi" class="actions right">
-        <button type="button" class="icon-btn sm" title="Edit" aria-label="Edit <?= h($d['name']) ?>" data-dev-edit="<?= h(json_encode($data)) ?>"><?= icon('edit') ?></button>
-        <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll" title="Buat kode instalasi (username + password sekali pakai)" aria-label="Kode instalasi"<?= $code_active ? " onclick=\"return confirm('Kode lama untuk " . h($d['device_key']) . " masih aktif dan akan diganti. Lanjutkan?')\"" : '' ?>><?= icon('enroll') ?></button>
+        <?php if ($sup): ?><button type="button" class="icon-btn sm" title="Edit" aria-label="Edit <?= h($d['name']) ?>" data-dev-edit="<?= h(json_encode($data)) ?>"><?= icon('edit') ?></button><?php endif; ?>
+        <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll" title="Buat kode instalasi (username + password sekali pakai)" aria-label="Kode instalasi"<?= $code_active ? ' data-confirm="Kode lama untuk ' . h($d['device_key']) . ' masih aktif dan akan diganti. Lanjutkan?"' : '' ?>><?= icon('enroll') ?></button>
         <?php if ($code_active): ?><button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll_cancel" title="Batalkan kode instalasi" aria-label="Batalkan kode"><?= icon('x') ?></button><?php endif; ?>
-        <button form="dl" class="icon-btn sm" name="id" value="<?= $d['id'] ?>" title="Unduh paket agent (config.json berisi token, tanpa login)" aria-label="Unduh agent"><?= icon('download') ?></button>
+        <?php if ($sup): ?><button form="dl" class="icon-btn sm" name="id" value="<?= $d['id'] ?>" title="Unduh paket agent (config.json berisi token, tanpa login)" aria-label="Unduh agent"><?= icon('download') ?></button>
         <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="regen" title="Buat token baru" aria-label="Token baru" data-confirm="Buat token baru untuk <?= h($d['device_key']) ?>? Agent di laptop ini harus dipasang ulang."><?= icon('key') ?></button>
-        <button form="f<?= $d['id'] ?>" class="icon-btn sm danger" name="act" value="delete" title="Hapus" aria-label="Hapus" data-confirm="Hapus laptop <?= h($d['device_key']) ?>?"><?= icon('trash') ?></button>
+        <button form="f<?= $d['id'] ?>" class="icon-btn sm danger" name="act" value="delete" title="Hapus" aria-label="Hapus" data-confirm="Hapus laptop <?= h($d['device_key']) ?>?"><?= icon('trash') ?></button><?php endif; ?>
       </td>
       <?php endif; ?>
     </tr>
@@ -283,7 +286,7 @@ topbar('devices', 'Monitoring Laptop');
 // Kode instalasi yang baru dibuat: ditampilkan sekali saja
 $show = $_SESSION['enroll_show'] ?? null;
 unset($_SESSION['enroll_show']);
-if ($show && $sup):
+if ($show && $op):
     $inst_url = $server_url . '/install/' . rawurlencode($show['key']);
     $copy = "Instalasi GateMon Agent - {$show['key']} ({$show['name']})\nBuka di laptop : $inst_url\nUsername       : {$show['key']}\nPassword       : {$show['pass']}\nBerlaku        : sampai " . date('d/m/Y H:i', strtotime($show['exp'])) . " (sekali pakai)";
 ?>

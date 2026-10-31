@@ -3,6 +3,7 @@
 const CSRF = document.querySelector('meta[name=csrf]').content;
 const ROLE = document.querySelector('meta[name=role]').content;
 const SUP = ROLE === 'supervisor';
+const OP = SUP || ROLE === 'operator';   // petugas: boleh kirim perintah kecuali reboot/shutdown (dicek juga di server)
 // versi agent a >= b (mis. '1.14.0')
 const verGe = (a, b) => { const x = String(a||'0').split('.').map(Number), y = b.split('.').map(Number); for(let i=0;i<3;i++){ if((x[i]||0)!==(y[i]||0)) return (x[i]||0)>(y[i]||0); } return true; };
 const canLive = d => SUP && verGe(d.agent_version, '1.14.0');   // layar live: agent 1.14+
@@ -24,10 +25,11 @@ const canWake = d => d.state==='offline' && (d.nics||[]).length > 0;
 function cmdsFor(d){
   const gate = d.mode !== 'monitor';
   const list = Object.keys(LABEL).filter(t => t!=='WAKE' && (gate || !GATE_CMDS.includes(t)));
-  return canWake(d) ? ['WAKE'].concat(list) : list;
+  const ok = SUP ? list : list.filter(t => !DANGER.includes(t));
+  return canWake(d) ? ['WAKE'].concat(ok) : ok;
 }
 
-if (SUP && $('toolbar')) $('toolbar').hidden = false;
+if (OP && $('toolbar')){ $('toolbar').hidden = false; if(!SUP) document.querySelectorAll('#toolbar [data-all]').forEach(b=>{ if(DANGER.includes(b.dataset.all)) b.remove(); }); }
 
 function fmtAge(s){ if(s==null) return 'belum pernah'; if(s<60) return s+' dtk lalu'; if(s<3600) return Math.floor(s/60)+' mnt lalu'; return Math.floor(s/3600)+' jam lalu'; }
 function fmtUp(s){ if(s==null) return '-'; const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h+'j '+m+'m'; }
@@ -95,7 +97,7 @@ function detailHtml(d){
   const p = problemsOf(d);
   const radmin = d.ip ? `<a class="btn btn-primary" href="radmin://${esc(d.ip)}" title="Buka Radmin Viewer ke ${esc(d.ip)}">Remote via Radmin</a><button class="btn" data-copy="${esc(d.ip)}">Salin IP</button>`
     + `<a class="radmin-setup" href="radmin_setup.php" title="Unduh & jalankan sekali di laptop admin ini agar tombol Remote via Radmin membuka Radmin Viewer">Belum terbuka? Pasang link Radmin</a>` : '';
-  const cmds = SUP ? cmdsFor(d)
+  const cmds = OP ? cmdsFor(d)
     .map(t=>`<button class="btn ${DANGER.includes(t)?'btn-danger':(t==='WAKE'?'btn-primary':'')}" data-cmd="${t}" data-id="${d.id}" data-name="${esc(d.name)}">${LABEL[t]}</button>`).join('') : '';
   return `<div class="detail">
     ${p.length?`<div class="bad">${p.map(esc).join(' · ')}</div>`:`<div class="good">Sehat · lapor ${fmtAge(d.age)}</div>`}
@@ -327,7 +329,7 @@ function openCtx(d, x, y){
   const items = [{a:'detail', l:'Detail laptop'}];
   if(canLive(d)) items.push({a:'live', l:'Layar live'});
   if(d.ip) items.push({a:'radmin', l:'Remote via Radmin'}, {a:'copy', l:'Salin IP', hint:d.ip});
-  if(SUP){
+  if(OP){
     items.push('sep');
     cmdsFor(d).forEach(t=>{
       if(t==='REBOOT' || (t!=='WAKE' && items[items.length-1] && items[items.length-1].c==='WAKE')) items.push('sep');   // WAKE di atas, aksi berbahaya di bawah

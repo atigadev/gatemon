@@ -2,7 +2,8 @@
 (function(){
   const root = document.getElementById('sup'); if(!root) return;
   const CSRF = document.querySelector('meta[name=csrf]').content;
-  const SUP = document.querySelector('meta[name=role]').content === 'supervisor';
+  const ROLE = document.querySelector('meta[name=role]').content;
+  const SUP = ROLE === 'supervisor', OP = SUP || ROLE === 'operator';   // petugas: balas chat & tangani darurat
   const convsEl = document.getElementById('sup-convs'), main = document.getElementById('sup-main'), pick = document.getElementById('sup-pick');
   const QUICK = ['Baik, tim support segera ke lokasi.', 'Mohon tunggu sebentar.', 'Sudah teratasi? Mohon dicek kembali.', 'Silakan restart browser gate.'];
   let dev = +root.dataset.dev || 0, since = 0, seenUpto = 0, info = null, busy = false, devList = null;
@@ -76,14 +77,14 @@
     head.append(ctl);
     const emg = el('div', 'sup-emg'); emg.hidden = true; emg.id = 'sup-emg';
     emg.append(el('b', '', 'DARURAT belum ditangani'), el('span', 'muted', ''));
-    if(SUP){ const a = el('button', 'btn btn-danger', 'Tangani sekarang'); a.type = 'button'; a.id = 'sup-ack'; emg.append(a); }
+    if(OP){ const a = el('button', 'btn btn-danger', 'Tangani sekarang'); a.type = 'button'; a.id = 'sup-ack'; emg.append(a); }
     const warn = [];
     if(!d.supported) warn.push('Agent di laptop ini versi ' + (d.agent_version || '?') + ': belum punya tombol chat. Update agent ke 1.11 (menu Agent) agar pesan terlihat di laptop.');
     const list = el('div', 'sup-msgs'); list.id = 'sup-msgs';
     main.append(head, emg);
     warn.forEach(w => main.append(el('p', 'notice warn-notice small', w)));
     main.append(list);
-    if(SUP){
+    if(OP){
       const f = el('form', 'sup-form'); f.id = 'sup-form';
       const q = el('div', 'sup-quick'); QUICK.forEach(x => { const b = el('button', 'sup-chip', x); b.type = 'button'; b.dataset.quick = x; q.append(b); });
       const row = el('div', 'sup-row');
