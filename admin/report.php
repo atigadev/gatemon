@@ -7,22 +7,7 @@ require_login();
 $pdo = db();
 const STATUS_LABEL = ['success' => 'Berhasil', 'belum' => 'Belum waktunya', 'notfound' => 'Tidak ditemukan', 'error' => 'Error'];
 
-// ---------- group kategori (tabel scan_groups: kategori dari halaman gate -> group, mis. VIP -> ID-CARD) ----------
-const NO_GROUP = 'Tanpa group';
-const GROUP_FIRST = ['ID-CARD', 'ASIC', 'EXH'];   // urutan tampil; group lain menyusul urut abjad
-$gmap = [];
-foreach ($pdo->query("SELECT category, grp FROM scan_groups") as $r) $gmap[strtoupper(trim($r['category']))] = $r['grp'];
-function grp_of($c) { global $gmap; $c = strtoupper(trim((string)$c)); return $c === '' ? NO_GROUP : ($gmap[$c] ?? NO_GROUP); }
-function grp_sort(array $names) {
-    $names = array_values(array_unique($names));
-    usort($names, function ($a, $b) {
-        $ia = array_search($a, GROUP_FIRST, true); $ib = array_search($b, GROUP_FIRST, true);
-        if ($a === NO_GROUP || $b === NO_GROUP) return ($a === NO_GROUP) - ($b === NO_GROUP);
-        if ($ia !== false || $ib !== false) return ($ia === false ? 99 : $ia) - ($ib === false ? 99 : $ib);
-        return strcmp($a, $b);
-    });
-    return $names;
-}
+require __DIR__ . '/report_groups.php';   // group kategori (grp_of, grp_sort) dan tgl()
 // simpan pemetaan (modal "Atur group", supervisor). Group kosong = kategori dilepas dari group.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['act'] ?? '') === 'groups' && is_supervisor()) {
     if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
@@ -345,11 +330,6 @@ function bars($rows, $total) {
     }
     return $o . '</table>';
 }
-function tgl($d) {
-    $bln = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-    $t = strtotime($d);
-    return date('j', $t) . ' ' . $bln[(int)date('n', $t)] . ' ' . date('Y', $t);
-}
 $period = $from === $to ? tgl($from) : tgl($from) . ' – ' . tgl($to);
 
 page_head('Laporan scan');
@@ -364,6 +344,7 @@ topbar('report', 'Monitoring Laptop');
           <?php foreach ([0 => 'Mati', 10 => '10 dtk', 30 => '30 dtk', 60 => '1 mnt', 120 => '2 mnt', 300 => '5 mnt'] as $s => $l): ?><option value="<?= $s ?>"><?= $l ?></option><?php endforeach; ?>
         </select></label>
       <span class="rep-auto-st" id="auto-status" aria-live="polite"></span>
+      <a class="btn" href="report_daily.php"><?= icon('chart') ?> Laporan per hari</a>
       <a class="btn btn-primary" href="report.php?<?= h($qs) ?>&amp;csv=1"><?= icon('download') ?> Unduh CSV (<?= $n_uniq ?> QR)</a>
     </div>
   </div>

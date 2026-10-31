@@ -698,3 +698,30 @@ body:has(.modal:not([hidden])) .gm-pops{top:16px;transform:translateX(-50%)}
 @media (max-width:640px){.shotv-tools{order:3;width:100%;justify-content:center}.shotv-x{order:2}.shotv-title{font-size:14px}.shotv-meta{display:none}}
 /* saat penampil screenshot terbuka, popup notifikasi pindah ke bawah agar tidak menutupi progress / gambar */
 body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translateX(-50%)}
+
+/* laporan per hari (report_daily.php) */
+.daily-save{margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)}
+.stat .value.daily-small{font-size:22px}
+.daily-table td,.daily-table th{white-space:nowrap}
+.daily-table td.bad{color:var(--bad);font-weight:700}
+.daily-table td.warn{color:var(--warn);font-weight:700}
+.daily-table tr.daily-empty td{opacity:.5}
+.daily-table tr.daily-busy td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.daily-heat td[style]{background:color-mix(in srgb,var(--ok) calc(var(--a,0) * 70%),transparent)}
+.daily-heat td,.daily-heat th{padding:5px 6px;min-width:30px}
+@media print{
+  .topbar,.no-print,.gm-pops,.sup-alarm,.snd-hint{display:none !important}
+  body{background:#fff !important;color:#000}
+  .page{padding:0;max-width:none}
+  .card,.stat{break-inside:avoid;box-shadow:none;border-color:#bbb;background:#fff}
+  .table-wrap{overflow:visible}
+  a{color:inherit;text-decoration:none}
+  .notice{display:none}
+  .stat .value,.daily-table td,.daily-heat td,.rep-bars td{color:#000 !important;opacity:1 !important}
+  .daily-table td.bad{color:#c00 !important}
+  .daily-table,.daily-heat{font-size:9.5px}
+  .daily-table th{white-space:normal;font-size:8.5px}
+  .daily-table td,.daily-table th,.daily-heat td,.daily-heat th{padding:4px 5px}
+  .daily-heat td[style]{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4 landscape;margin:10mm}
+}

@@ -62,3 +62,5 @@ window.speakName = function(s){
     .replace(/\b0+(\d)/g, '$1')
     .replace(/\s+/g, ' ').trim();
 };
+// Tombol cetak (laporan): <button data-print>
+document.addEventListener('click', e=>{ if(e.target.closest('[data-print]')) window.print(); });
