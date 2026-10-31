@@ -28,7 +28,7 @@ const Alerts = (function(){
   function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} paintButton(); }
   const textOf = k => (S.text[k] || EVENTS[k].text);
   const muted = () => S.mode==='off' || Date.now() < S.mutedUntil;
-  const fill = (t, d) => t.replace(/\{(\w+)\}/g, (m,k) => ({nama:d.name, id:d.device_key, kategori:d.category_name||'tanpa kategori', pos:d.gate||'', baterai:d.battery??'', n:d.n}[k] ?? m));
+  const fill = (t, d) => t.replace(/\{(\w+)\}/g, (m,k) => ({nama:speakName(d.name), id:d.device_key, kategori:speakName(d.category_name||'tanpa kategori'), pos:speakName(d.gate||''), baterai:d.battery??'', n:d.n}[k] ?? m));
 
   // ---------- nada (Web Audio, tanpa file) ----------
   function audio(){
@@ -83,8 +83,42 @@ const Alerts = (function(){
       battery: on && d.battery!=null && +d.battery<20 && !+d.battery_plugged,
     };
   }
+  // ---------- popup (tampil walau suara dimatikan; semua laptop, hanya saat kejadian baru) ----------
+  const POP = {
+    offline:   ['bad',  'Laptop terputus',       d=>'Tidak melapor ke server.'],
+    browser:   ['warn', 'Browser gate tertutup', d=>'Halaman gate tidak tampil di layar laptop.'],
+    page:      ['warn', 'Halaman gate gagal',    d=>'Halaman gate tidak bisa diakses dari laptop.'],
+    battery:   ['warn', 'Baterai lemah',         d=>'Baterai tinggal '+d.battery+'% dan tidak dicas.'],
+    recovered: ['ok',   'Kembali terhubung',     d=>'Laptop melapor lagi ke server.'],
+    scanfail:  ['warn', 'Banyak scan gagal',     d=>d.n+' scan tidak ditemukan dalam 1 menit.'],
+  };
+  let prevPop = null;
+  const where = d => [d.category_name, d.gate].filter(Boolean).join(' · ');
+  function pop(k, ds){
+    if(!window.gmPopup || !ds.length) return;
+    const [level, title, text] = POP[k];
+    if(ds.length > 4){ gmPopup({level, title: title+': '+ds.length+' laptop', text: ds.map(d=>d.name).join(', ')}); return; }
+    ds.forEach(d=>gmPopup({level, title: title+': '+d.name, text: [where(d), text(d)].filter(Boolean).join(' · ')}));
+  }
+  function popups(devices, scanfail){
+    const cur = {}, found = {offline:[], browser:[], page:[], battery:[], recovered:[]};
+    devices.forEach(d=>{
+      const p = problems(d), was = prevPop && prevPop[d.id]; cur[d.id] = p;
+      if(!prevPop) return;
+      for(const k of ['offline','browser','page','battery']) if(p[k] && (!was || !was[k])) found[k].push(d);
+      if(was && was.offline && !p.offline) found.recovered.push(d);
+    });
+    if(!prevPop && window.gmPopup){
+      const n = devices.filter(d=>{ const p=cur[d.id]; return p.offline||p.browser||p.page; }).length;
+      if(n) gmPopup({level:'warn', title:'Perhatian', text:`Saat ini ${n} laptop bermasalah.`});
+    }
+    prevPop = cur;
+    for(const k in found) pop(k, found[k]);
+    pop('scanfail', scanfail);
+  }
+
   function update(devices, inScope, scanFailLimit){
-    if(serverDown){ serverDown=false; }
+    if(serverDown){ serverDown=false; if(window.gmPopup) gmPopup({level:'ok', title:'Server terhubung kembali', text:'Data status laptop diperbarui lagi.'}); }
     const list = S.tabOnly && inScope ? devices.filter(inScope) : devices;
     const cur = {}, found = {offline:[], browser:[], page:[], battery:[], recovered:[], scanfail:[]};
     // scan "tidak ditemukan" melonjak dalam 1 menit (ambang di menu Pengaturan, 0 = mati); maks 1x per 2 menit per laptop
@@ -106,6 +140,7 @@ const Alerts = (function(){
       }
       if(was && was.offline && !p.offline) found.recovered.push(d);
     });
+    popups(devices, found.scanfail);
     const first = prev===null;
     prev = cur;
     if(first){
@@ -125,6 +160,7 @@ const Alerts = (function(){
   function serverLost(){
     if(serverDown) return;
     serverDown = true;
+    if(window.gmPopup) gmPopup({level:'bad', title:'Server tidak terjangkau', text:'Status laptop tidak diperbarui sampai koneksi ke server pulih.'});
     if(S.on.server) announce([textOf('server')]);
   }
 

@@ -55,10 +55,6 @@
     });
     if(!unlocked() && emg.some(e => !quiet.includes(+e.id))) box.append(el('div', 'sup-alarm-hint', 'Klik di mana saja pada halaman ini agar alarm berbunyi.'));
   }
-  function toast(text, href){
-    const t = el('a', 'sup-toast', text); t.href = href;
-    document.body.append(t); setTimeout(() => t.classList.add('out'), 5000); setTimeout(() => t.remove(), 5600);
-  }
 
   // ---------- polling ----------
   async function poll(){
@@ -71,12 +67,14 @@
       emg = j.emergencies;
       quiet = quiet.filter(id => emg.some(e => +e.id === id) || !before.includes(id)); save();
       badge(j.unread + emg.length, emg.length > 0);
-      if(emg.some(e => !before.includes(+e.id))) nextSay = 0;   // darurat baru: langsung bunyi
+      const fresh = emg.filter(e => !before.includes(+e.id));
+      if(fresh.length) nextSay = 0;   // darurat baru: langsung bunyi
+      fresh.forEach(e => window.gmPopup && gmPopup({level: 'bad', title: '🚨 DARURAT: ' + e.name, text: [e.category_name, e.gate, 'minta bantuan sejak ' + hm(e.created_at)].filter(Boolean).join(' · '), href: 'support.php?dev=' + e.device_id}));
       banner();
       const last = j.last;
       if(last && lastId !== null && +last.id > lastId && !emg.some(e => +e.device_id === +last.device_id && +e.id === +last.id)){
         const here = onSupport && new URL(location.href).searchParams.get('dev') == last.device_id;
-        if(!here){ chime(); toast('💬 ' + last.name + ': ' + last.body.slice(0, 80), 'support.php?dev=' + last.device_id); }
+        if(!here){ chime(); if(window.gmPopup) gmPopup({level: 'info', title: '💬 Pesan dari ' + last.name, text: last.body.slice(0, 140), href: 'support.php?dev=' + last.device_id}); }
       }
       if(last) lastId = Math.max(lastId || 0, +last.id); else if(lastId === null) lastId = 0;
     }catch(e){}
@@ -88,7 +86,7 @@
     siren();
     if(Date.now() >= nextSay){
       nextSay = Date.now() + 20000;
-      setTimeout(() => say(loud.length > 1 ? `Darurat. ${loud.length} laptop membutuhkan bantuan.` : `Darurat. ${loud[0].name}${loud[0].gate ? ', ' + loud[0].gate : ''}, membutuhkan bantuan.`), 2300);
+      setTimeout(() => say(loud.length > 1 ? `Darurat. ${loud.length} laptop membutuhkan bantuan.` : `Darurat. ${speakName(loud[0].name)}${loud[0].gate ? ', ' + speakName(loud[0].gate) : ''}, membutuhkan bantuan.`), 2300);
     }
   }, 4000);
 
