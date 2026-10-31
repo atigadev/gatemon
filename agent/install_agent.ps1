@@ -6,7 +6,12 @@
 # -User/-Pass opsional untuk instalasi tanpa tanya (misal lewat skrip); tanpa itu password diketik tersembunyi.
 # -Python: pakai python.exe tertentu; -SkipTask: tanpa membuat tugas otomatis (untuk teknisi / pengujian).
 # -NoWoL: jangan ubah pengaturan Wake-on-LAN (Fast Startup & daya kartu jaringan).
-param([switch]$DryRun, [string]$Target = 'C:\GateMon-Agent', [string]$User = '', [string]$Pass = '', [string]$Python = '', [switch]$SkipTask, [switch]$NoWoL)
+# Persiapan laptop (pengganti skrip konfigurasi lama): nama komputer = nama laptop di GateMon (ditanya dulu),
+# IP kartu jaringan ke DHCP (ditanya, bawaan tidak), lalu restart (ditanya). -NoRename / -Dhcp / -Restart untuk tanpa tanya.
+# Windows Update, daya (tidak sleep) dan wallpaper TIDAK diatur di sini: agent menerapkannya dari menu Daya & Wallpaper.
+# Firewall sengaja TIDAK dimatikan: agent hanya membuat koneksi keluar ke server, tidak butuh port masuk.
+param([switch]$DryRun, [string]$Target = 'C:\GateMon-Agent', [string]$User = '', [string]$Pass = '', [string]$Python = '', [switch]$SkipTask, [switch]$NoWoL,
+      [switch]$NoRename, [switch]$Dhcp, [switch]$Restart)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -19,6 +24,23 @@ function Pause-End { if (-not $DryRun -and -not [Console]::IsInputRedirected) { 
 function Fail($text) { Say ''; Say "GAGAL: $text" Red; Pause-End; exit 1 }
 # config.json harus UTF-8 tanpa BOM agar terbaca oleh json.load di agent.py
 function Write-Utf8($path, $text) { [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false))) }
+# Pertanyaan Y/N; tanpa tanya (instalasi lewat skrip / -User -Pass / input dialihkan) memakai jawaban bawaan
+$Quiet = ($User -and $Pass) -or [Console]::IsInputRedirected
+function Ask($q, $def) {
+    if ($Quiet) { return $def }
+    $a = (Read-Host ("$q " + $(if ($def) { '[Y/n]' } else { '[y/N]' }))).Trim()
+    if ($a -eq '') { return $def }
+    return $a -match '^[Yy]'
+}
+# Nama komputer Windows yang sah dari nama laptop di GateMon: huruf/angka/minus, maks 15 karakter, tidak angka semua
+function Computer-Name($name, $key) {
+    foreach ($n in @($name, $key)) {
+        $c = ([string]$n).Trim().ToUpper() -replace '[^A-Z0-9-]+', '-' -replace '-{2,}', '-'
+        $c = $c.Trim('-')
+        if ($c.Length -ge 1 -and $c.Length -le 15 -and $c -notmatch '^[0-9]+$') { return $c }
+    }
+    return ''
+}
 
 Say ''
 Say '=== GateMon Agent - instalasi ===' Cyan
@@ -76,7 +98,9 @@ if (Test-Path $pkgCfg) {
     $cfg | Add-Member -NotePropertyName server_url -NotePropertyValue $server -Force
     $cfgText = $cfg | ConvertTo-Json
     Say "      OK: terdaftar sebagai $($r.device.key) - $($r.device.name)" Green
+    $devKey = [string]$r.device.key; $devName = [string]$r.device.name
 }
+if (-not $devKey) { try { $devKey = [string]($cfgText | ConvertFrom-Json).device_key; $devName = '' } catch { $devKey = '' } }
 
 if ($DryRun) {
     New-Item -ItemType Directory -Force $Target | Out-Null
@@ -227,7 +251,53 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
+Say "      Agent terpasang di $Target dan berjalan otomatis setiap $runAs login." Green
+
+# ---------- persiapan laptop (tidak menggagalkan instalasi) ----------
+$ErrorActionPreference = 'Continue'
+$needRestart = $false
 Say ''
-Say "Selesai. Agent terpasang di $Target dan berjalan otomatis setiap $runAs login." Green
-Say 'Cek laptop ini di dashboard GateMon (biasanya online dalam beberapa detik).' Green
+Say '[+] Persiapan laptop' Cyan
+# nama komputer = nama laptop di GateMon (mis. TICKET-BOX-01), berlaku setelah restart
+$newName = Computer-Name $devName $devKey
+if ($NoRename) {
+    Say '      Nama komputer: tidak diubah (-NoRename).'
+} elseif (-not $newName) {
+    Say "      Nama komputer: tidak diubah (nama laptop '$devName' / '$devKey' tidak bisa dipakai sebagai nama Windows)." Yellow
+} elseif ($newName -eq $env:COMPUTERNAME.ToUpper()) {
+    Say "      Nama komputer: sudah $newName."
+} elseif (Ask "      Ganti nama komputer $env:COMPUTERNAME menjadi $newName ?" $true) {
+    try {
+        Rename-Computer -NewName $newName -Force -ErrorAction Stop -WarningAction SilentlyContinue
+        Say "      Nama komputer: $newName (berlaku setelah restart)" Green
+        $needRestart = $true
+    } catch { Say "      Nama komputer gagal diganti: $($_.Exception.Message)" Yellow }
+}
+# IP ke DHCP: hanya kartu jaringan fisik yang tersambung dan memakai IP statis. Bawaan TIDAK, karena laptop dengan
+# IP statis yang memang diperlukan untuk menjangkau server akan terputus.
+$static = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' } | Where-Object {
+    (Get-NetIPInterface -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).Dhcp -eq 'Disabled' })
+if (-not $static.Count) {
+    Say '      Jaringan: semua kartu jaringan aktif sudah DHCP.'
+} elseif ($Dhcp -or (Ask ('      Kartu jaringan berikut memakai IP statis: ' + (($static | ForEach-Object { $_.Name }) -join ', ') + '. Ubah ke DHCP?') $false)) {
+    foreach ($a in $static) {
+        & netsh interface ipv4 set address name="$($a.Name)" source=dhcp *> $null
+        $ok = $LASTEXITCODE -eq 0
+        & netsh interface ipv4 set dnsservers name="$($a.Name)" source=dhcp *> $null
+        if ($ok) { Say "      Jaringan: $($a.Name) -> DHCP" Green } else { Say "      Jaringan: $($a.Name) gagal diubah ke DHCP" Yellow }
+    }
+} else {
+    Say '      Jaringan: IP statis dibiarkan.'
+}
+Say '      Windows Update, daya (tidak sleep) dan wallpaper diatur dari server: menu Daya & Wallpaper di dashboard.'
+$ErrorActionPreference = 'Stop'
+
+Say ''
+Say 'Selesai. Cek laptop ini di dashboard GateMon (biasanya online dalam beberapa detik).' Green
+if ($Restart -or ($needRestart -and -not $Quiet -and (Ask 'Restart laptop sekarang agar nama komputer baru berlaku?' $true))) {
+    Say 'Laptop restart dalam 10 detik...' Yellow
+    & shutdown.exe /r /t 10 /c "GateMon Agent: instalasi selesai, restart." | Out-Null
+} elseif ($needRestart) {
+    Say 'Nama komputer baru berlaku setelah laptop di-restart.' Yellow
+}
 Pause-End
