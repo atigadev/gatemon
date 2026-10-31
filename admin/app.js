@@ -162,7 +162,7 @@ function recentCmds(d){
   if(!cs.length) return '';
   return `<table class="table small"><tr><th>Waktu</th><th>Perintah</th><th>Status</th><th>Hasil</th></tr>${cs.map(c=>`<tr><td>${esc(c.created_at.slice(11,16))}</td>
     <td>${esc(LABEL[c.type]||c.type)}</td><td class="st-${c.status}">${c.status}</td>
-    <td>${c.type==='SCREENSHOT'&&c.status==='done'?(+c.has_shot?`<a href="#" data-shot="${c.id}">lihat</a>`:'<span class="muted">dihapus</span>'):esc(c.result||'')}</td></tr>`).join('')}</table>`;
+    <td>${c.type==='SCREENSHOT'&&c.status==='done'?(+c.has_shot?`<a href="#" data-shot="${c.id}" data-title="Screenshot · ${esc(c.device_name)} · ${esc(c.created_at.slice(11,16))}">lihat</a>`:'<span class="muted">dihapus</span>'):esc(c.result||'')}</td></tr>`).join('')}</table>`;
 }
 
 // ---------- live camera (Agent DVR) ----------
@@ -235,7 +235,7 @@ async function refresh(){
     if($('log')) $('log').innerHTML = j.logs.map(l=>`<li class="${l.level}"><span class="t">${esc(l.created_at.slice(11))}</span>${esc(l.message)}</li>`).join('');
     if($('cmds')) $('cmds').innerHTML = '<tr><th>Waktu</th><th>Laptop</th><th>Perintah</th><th>Status</th><th>Hasil</th></tr>'+
       j.commands.map(c=>`<tr><td>${esc(c.created_at.slice(11,16))}</td><td>${esc(c.device_name)}</td><td>${esc(LABEL[c.type]||c.type)}</td><td class="st-${c.status}">${c.status}</td>
-        <td>${c.type==='SCREENSHOT'&&c.status==='done'?(+c.has_shot?`<a href="#" data-shot="${c.id}">lihat</a>`:'<span class="muted">dihapus</span>'):esc(c.result||'')}</td></tr>`).join('');
+        <td>${c.type==='SCREENSHOT'&&c.status==='done'?(+c.has_shot?`<a href="#" data-shot="${c.id}" data-title="Screenshot · ${esc(c.device_name)} · ${esc(c.created_at.slice(11,16))}">lihat</a>`:'<span class="muted">dihapus</span>'):esc(c.result||'')}</td></tr>`).join('');
     const problem = j.summary.warn + j.summary.offline;
     try{ if(typeof Alerts!=='undefined') Alerts.update(j.devices, d=>activeTab==='all' || tabOf(d)===activeTab, j.scan_fail_alert); }catch(err){ console.error(err); }
     document.title = (problem?`(${problem}) `:'')+(WALL?'Monitor':'Dashboard')+' - GateMon';
@@ -319,7 +319,8 @@ function askAndSend(type, device_id, name){
   } else if(CONFIRM[type]){
     openModal(`${LABEL[type]} → ${target}`, `<p>${CONFIRM[type]}</p><p>Ketik <b>YA</b> untuk melanjutkan:</p><input id="m-yes" style="padding:6px;width:120px">`, ()=>{
       if($('m-yes').value.trim().toUpperCase()!=='YA'){alert('Ketik YA untuk konfirmasi');return false;} send(type,device_id,null,cat); });
-  } else { closeModal(); send(type,device_id,null,cat); }
+  } else if(type==='SCREENSHOT' && device_id!=='all' && window.shotV){ closeModal(); shotV.request(device_id, name); }   // layar progress + penampil gambar (shot.js)
+  else { closeModal(); send(type,device_id,null,cat); }
 }
 
 document.addEventListener('click', e=>{
@@ -329,7 +330,7 @@ document.addEventListener('click', e=>{
   const b=e.target.closest('[data-cmd]'); if(b){ askAndSend(b.dataset.cmd, b.dataset.id, b.dataset.name); return; }
   const a=e.target.closest('[data-all]'); if(a){ askAndSend(a.dataset.all, 'all', null); return; }
   const c=e.target.closest('[data-copy]'); if(c){ navigator.clipboard?.writeText(c.dataset.copy); c.textContent='IP disalin'; setTimeout(()=>c.textContent='Salin IP',1500); return; }
-  const s=e.target.closest('[data-shot]'); if(s){ e.preventDefault(); openModal('Screenshot', `<img src="screenshot.php?id=${s.dataset.shot}&t=${Date.now()}">`, null); return; }
+  const s=e.target.closest('[data-shot]'); if(s){ e.preventDefault(); if(window.shotV) shotV.view(s.dataset.shot, s.dataset.title); else window.open('screenshot.php?id='+encodeURIComponent(s.dataset.shot)); return; }
   const fs=e.target.closest('[data-fullscreen]'); if(fs){ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); return; }
   const dv=e.target.closest('[data-dev]'); if(dv){ showDetail(dv.dataset.dev); }
 });

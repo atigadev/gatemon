@@ -663,3 +663,38 @@ body:has(.modal:not([hidden])) .gm-pops{top:16px;transform:translateX(-50%)}
 @keyframes gmpopin{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}
 @keyframes gmpopbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 @media (max-width:600px){ .gm-pop{padding:16px 46px 20px 16px;gap:12px}.gm-pop-ic{width:40px;height:40px;font-size:21px}.gm-pop-body b{font-size:17px}.gm-pop-body span{font-size:14.5px} }
+
+/* penampil screenshot: layar progress lalu gambar yang bisa di-zoom & digeser (shot.js) */
+.shotv{position:fixed;inset:0;z-index:65;display:flex;flex-direction:column;background:#060a13;animation:fade .15s;color:#e8eef9}
+.shotv[hidden]{display:none}
+.shotv-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.1);background:rgba(10,16,30,.85)}
+.shotv-title{font-size:16px;margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shotv-meta{font-size:13px;opacity:.7}
+.shotv-tools{display:flex;gap:6px;align-items:center}
+.shotv-tools[hidden]{display:none}
+.shotv-pct{min-width:64px}
+.shotv-stage{position:relative;flex:1;overflow:hidden;touch-action:none;user-select:none}
+.shotv.has-img .shotv-stage{cursor:grab}
+.shotv-stage.drag{cursor:grabbing}
+.shotv-img{position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;border:0;border-radius:0;box-shadow:0 10px 50px rgba(0,0,0,.6);image-rendering:auto}
+.shotv-hint{text-align:center;font-size:12px;opacity:.55;padding:6px}
+.shotv:not(.has-img) .shotv-hint{visibility:hidden}
+.shotv-prog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(460px,calc(100% - 32px));text-align:center;
+  background:rgba(20,28,46,.9);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:28px 26px}
+.shotv-spin{width:54px;height:54px;margin:0 auto 18px;border-radius:50%;border:5px solid rgba(255,255,255,.15);border-top-color:var(--ok);animation:shotspin .9s linear infinite}
+@keyframes shotspin{to{transform:rotate(360deg)}}
+.shotv-err{width:54px;height:54px;margin:0 auto 18px;border-radius:50%;background:var(--bad);color:#fff;font:700 30px/54px system-ui}
+.shotv-prog ol{list-style:none;margin:0;padding:0;text-align:left;display:flex;flex-direction:column;gap:10px}
+.shotv-prog li{position:relative;padding-left:30px;opacity:.45;font-size:15px}
+.shotv-prog li::before{content:'';position:absolute;left:0;top:1px;width:18px;height:18px;border-radius:50%;border:2px solid currentColor;box-sizing:border-box}
+.shotv-prog li.done{opacity:1}
+.shotv-prog li.done::before{content:'✓';background:var(--ok);border-color:var(--ok);color:#04121a;font:700 12px/14px system-ui;text-align:center}
+.shotv-prog li.now{opacity:1;font-weight:600}
+.shotv-prog li.now::before{border-color:var(--ok);border-top-color:transparent;animation:shotspin .9s linear infinite}
+.shotv-prog.bad li:not(.done){opacity:.45}
+.shotv-sec{margin:16px 0 0;font-size:13px;opacity:.6}
+.shotv-note{margin:12px 0 0;font-size:14px;color:var(--warn)}
+.shotv-prog.bad .shotv-note{color:#ffb4bf}
+@media (max-width:640px){.shotv-tools{order:3;width:100%;justify-content:center}.shotv-x{order:2}.shotv-title{font-size:14px}.shotv-meta{display:none}}
+/* saat penampil screenshot terbuka, popup notifikasi pindah ke bawah agar tidak menutupi progress / gambar */
+body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translateX(-50%)}

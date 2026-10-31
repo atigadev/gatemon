@@ -41,7 +41,7 @@ unset($d);
 
 $logs = $pdo->query("SELECT l.*, d.name AS device_name FROM logs l LEFT JOIN devices d ON d.id=l.device_id ORDER BY l.id DESC LIMIT 40")->fetchAll();
 $cmds = $pdo->query("SELECT c.id, c.device_id, c.type, c.status, c.created_by, c.created_at, c.done_at, d.name AS device_name,
-    CASE WHEN c.type='SCREENSHOT' THEN NULL ELSE LEFT(c.result,200) END AS result, (c.type='SCREENSHOT' AND c.result IS NOT NULL) AS has_shot
+    CASE WHEN c.type='SCREENSHOT' AND c.status<>'failed' THEN NULL ELSE LEFT(c.result,200) END AS result, (c.type='SCREENSHOT' AND c.result IS NOT NULL) AS has_shot
     FROM commands c JOIN devices d ON d.id=c.device_id ORDER BY c.id DESC LIMIT 25")->fetchAll();
 
 json_out(['ok' => true, 'now' => date('H:i:s'), 'offline_after' => $off, 'refresh' => setting('dashboard_refresh'), 'role' => current_user()['role'],

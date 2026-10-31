@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1183,6 +1183,54 @@ def sup_unread():
     return sum(1 for m in _sup["msgs"] if m["sender"] != "agent" and m["id"] > _sup["seen"])
 
 
+# Membacakan teks dengan suara Windows. Suara Bahasa Indonesia (Microsoft Andika) hanya ada di mesin suara WinRT/OneCore,
+# jadi dipakai lebih dulu; bila gagal, System.Speech (SAPI). Teks lewat variabel lingkungan, bukan disusun ke dalam perintah.
+_SAY_PS = r"""
+$ErrorActionPreference = 'Stop'
+$t = [string]$env:GM_SAY
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+  [void][Windows.Media.SpeechSynthesis.SpeechSynthesizer, Windows.Media.SpeechSynthesis, ContentType = WindowsRuntime]
+  $s = New-Object Windows.Media.SpeechSynthesis.SpeechSynthesizer
+  $v = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices | Where-Object { $_.Language -like 'id*' } | Select-Object -First 1
+  if ($v) { $s.Voice = $v }
+  $task = $asTask.MakeGenericMethod([Windows.Media.SpeechSynthesis.SpeechSynthesisStream]).Invoke($null, @($s.SynthesizeTextToStreamAsync($t)))
+  [void]$task.Wait(15000)
+  $p = New-Object System.Media.SoundPlayer ([System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($task.Result))
+  $p.PlaySync()
+} catch {
+  Add-Type -AssemblyName System.Speech
+  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  $s.Speak($t)
+}
+"""
+_say_at = [0.0]
+
+
+def speak(text):
+    """Bacakan teks (tidak menunggu selesai). Paling sering sekali per 6 detik agar pesan beruntun tidak bertumpuk."""
+    if not IS_WIN or not text or time.time() - _say_at[0] < 6:
+        return
+    _say_at[0] = time.time()
+    try:
+        enc = base64.b64encode(_SAY_PS.encode("utf-16-le")).decode()
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", enc],
+                         env=dict(os.environ, GM_SAY=str(text)[:200]), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        log.exception("suara")
+
+
+def speak_name(s):
+    """Nama untuk dibacakan: 'HELP-DESK_01' -> 'Help Desk 1' (kata kapital semua dibaca sebagai singkatan oleh mesin suara)."""
+    s = re.sub(r"[-_./\\]+", " ", str(s or ""))
+    s = re.sub(r"(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])", " ", s)
+    s = re.sub(r"\b[A-Z]{2,}\b", lambda m: m.group(0).capitalize() if re.search("[AIUEO]", m.group(0)) else m.group(0), s)
+    s = re.sub(r"\b0+(\d)", r"\1", s)
+    return " ".join(s.split())
+
+
 def sup_send(kind, text=""):
     cid = "%x%s" % (int(time.time() * 1000), os.urandom(4).hex())
     with _sup_lock:
@@ -1700,9 +1748,14 @@ class SupportUI:
             return
         self.place()
         u.InvalidateRect(self.bar, None, False)
-        n = sup_unread()
-        if _sup["max"] > self.beeped and n and not _sup["visible"]:
-            u.MessageBeep(0x40)                                                  # pesan baru dari support (jendela chat tertutup)
+        if _sup["max"] > self.beeped:
+            # pesan baru dari support: bunyi lalu suara "Ada pesan masuk dari ..." (juga saat jendela chat terbuka,
+            # karena petugas belum tentu sedang melihat layar)
+            new = [m for m in list(_sup["msgs"]) if m["sender"] != "agent" and m["id"] > self.beeped]
+            if new:
+                u.MessageBeep(0x40)
+                who = speak_name(new[-1].get("author") or "")
+                speak("Ada pesan masuk dari support" + (", " + who if who else "") + ".")
         self.beeped = max(self.beeped, _sup["max"])
         if _sup["visible"]:
             items = self.chat_items()

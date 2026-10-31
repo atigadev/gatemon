@@ -93,9 +93,11 @@ if ($type === 'WAKE') {
     if (!$sent) json_out(['ok' => false, 'error' => 'Tidak ada yang dikirim: ' . ($skip ? implode('; ', $skip) : 'tidak ada laptop offline')], 400);
     json_out(['ok' => true, 'count' => count($sent), 'skipped' => $skip]);
 }
+$cmd_ids = [];
 foreach ($ids as $id) {
     $ins->execute([$id, $type, $payload, $user]);
+    $cmd_ids[] = (int)$pdo->lastInsertId();
 }
 $names = $target === 'all' ? ($gate_only ? 'semua laptop gate' : 'SEMUA laptop') . ($cat_name !== '' ? " ($cat_name)" : '') : $pdo->query("SELECT name FROM devices WHERE id=" . (int)$target)->fetchColumn();
 log_event($target === 'all' ? null : (int)$target, 'info', "$user mengirim $type ke $names" . ($payload ? ": $payload" : ''));
-json_out(['ok' => true, 'count' => count($ids)]);
+json_out(['ok' => true, 'count' => count($ids), 'cmd_ids' => $cmd_ids]);   // cmd_ids: untuk layar progress (screenshot)
