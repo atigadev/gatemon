@@ -117,7 +117,7 @@ if (isset($b['update_result']) && preg_match('/^(ok|fail):(.{0,240})$/s', (strin
 $scan_on = scan_enabled($d);
 $ack = [];
 if (!empty($b['scans']) && is_array($b['scans'])) {
-    $ins = $pdo->prepare("INSERT IGNORE INTO scans (device_id, sid, gate, status, category, code, scanned_at) VALUES (?,?,?,?,?,?,?)");
+    $ins = $pdo->prepare("INSERT IGNORE INTO scans (device_id, sid, gate, status, category, peruntukan, code, scanned_at) VALUES (?,?,?,?,?,?,?,?)");
     foreach (array_slice($b['scans'], 0, 500) as $s) {
         if (!is_array($s) || !preg_match('/^[A-Za-z0-9_-]{1,40}$/', (string)($s['sid'] ?? ''))) continue;
         $ack[] = $s['sid'];
@@ -126,7 +126,8 @@ if (!empty($b['scans']) && is_array($b['scans'])) {
         $t = (int)($s['t'] ?? 0);
         if ($t < time() - 86400 * 30 || $t > time() + 300) $t = time();   // jam laptop ngawur: pakai waktu server
         $ins->execute([$d['id'], $s['sid'], mb_substr((string)($s['gate'] ?? ''), 0, 50), $status,
-            mb_substr((string)($s['category'] ?? ''), 0, 100), mb_substr((string)($s['code'] ?? ''), 0, 100), date('Y-m-d H:i:s', $t)]);
+            mb_substr((string)($s['category'] ?? ''), 0, 100), mb_substr(trim((string)($s['peruntukan'] ?? '')), 0, 100),
+            mb_substr((string)($s['code'] ?? ''), 0, 100), date('Y-m-d H:i:s', $t)]);
     }
     if (mt_rand(1, 300) === 1) {   // sesekali: hapus data scan lama (menu Pengaturan)
         $pdo->prepare("DELETE FROM scans WHERE scanned_at < NOW() - INTERVAL ? DAY")->execute([setting('scan_keep_days')]);
@@ -166,4 +167,5 @@ json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'su
     'auto_open' => setting('auto_open_gate'), 'auto_reopen' => setting('auto_reopen_gate'), 'reopen_after' => setting('reopen_after'),
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),
+    'scan_purpose_keys' => setting_patterns('scan_purpose_key'),
     'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'commands' => $cmds]);

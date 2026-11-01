@@ -62,7 +62,7 @@ function scanHistHtml(id){
   if(!rows.length) return '<p class="muted small">Belum ada scan tercatat.</p>';
   return `<table class="table small"><tr><th>Waktu</th><th>Status</th><th>Kategori</th><th>ID QR / barcode</th></tr>${rows.map(r=>`<tr>
     <td>${esc(r.scanned_at.slice(11,19))}</td><td><span class="sc-st ${esc(r.status)}">${esc(SCAN_LABEL[r.status]||r.status)}</span></td>
-    <td>${esc(r.category||'–')}</td><td><code>${esc(r.code||'–')}</code></td></tr>`).join('')}</table>`;
+    <td>${esc(r.category||'–')}${r.peruntukan ? `<br><small class="muted">${esc(r.peruntukan)}</small>` : ''}</td><td><code>${esc(r.code||'–')}</code></td></tr>`).join('')}</table>`;
 }
 async function loadScans(id){
   try{

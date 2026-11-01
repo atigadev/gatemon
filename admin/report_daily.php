@@ -66,6 +66,7 @@ for ($t = strtotime($from); $t <= strtotime($to); $t += 86400) {
 $S = "\x1f";
 $rows = q("SELECT DATE(scanned_at) AS d, code, COUNT(*) AS n, MIN(scanned_at) AS first_at,
     SUBSTRING_INDEX(GROUP_CONCAT(category ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS category,
+    SUBSTRING_INDEX(GROUP_CONCAT(peruntukan ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS peruntukan,
     SUBSTRING_INDEX(GROUP_CONCAT(gate ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS gate,
     SUBSTRING_INDEX(GROUP_CONCAT(device_id ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS device_id
     FROM scans WHERE scanned_at >= ? AND scanned_at < ? AND status = 'success' AND code <> ''
@@ -74,6 +75,7 @@ $seen = [];
 $grp_all = [];
 $gate_mx = [];   // gate -> tanggal -> QR unik
 $hour_mx = [];   // tanggal -> jam -> QR unik
+$purp_mx = [];   // group -> peruntukan -> tanggal -> QR unik
 foreach ($rows as $r) {
     $d = $r['d'];
     if (!isset($days[$d])) continue;
@@ -84,6 +86,8 @@ foreach ($rows as $r) {
     $g = grp_of($r['category']);
     $x['grp'][$g] = ($x['grp'][$g] ?? 0) + 1;
     $grp_all[$g] = true;
+    $pu = purpose_of($r['peruntukan']);
+    $purp_mx[$g][$pu][$d] = ($purp_mx[$g][$pu][$d] ?? 0) + 1;
     $h = (int)substr($r['first_at'], 11, 2);
     $x['hours'][$h] = ($x['hours'][$h] ?? 0) + 1;
     $hour_mx[$d][$h] = ($hour_mx[$d][$h] ?? 0) + 1;
@@ -131,6 +135,7 @@ foreach ($days as $d => $x) {
 }
 $T['uniq'] = count($seen);                       // QR unik selama event (dihitung sekali)
 $T['double'] = max(0, $T['ok'] - $T['uniq_sum']);
+$purp = purpose_sort($purp_mx);   // peruntukan per hari: ASIC & EXH selalu, group lain bila ada peruntukan terisi
 $peak = function ($hours) { if (!$hours) return null; $h = array_search(max($hours), $hours, true); return [$h, $hours[$h]]; };
 $hm = function ($dt) { return $dt ? substr($dt, 11, 5) : '–'; };
 
@@ -152,6 +157,15 @@ if (!empty($_GET['csv'])) {
     }
     fputcsv($out, array_merge(['TOTAL', '', $T['uniq_sum'], $T['uniq']], array_map(function ($g) use ($T) { return $T['grp'][$g] ?? 0; }, $groups),
         [$T['ok'], $T['double'], $T['fail'], '', '', '', '', '', '', '', '', $T['online'], $T['issues'], $T['emg'], $T['chat'], $T['cmds']]), ';');
+    if ($purp) {   // tabel kedua: QR unik per peruntukan per hari
+        fputcsv($out, [], ';');
+        fputcsv($out, array_merge(['Group', 'Peruntukan'], array_keys($days), ['Total']), ';');
+        foreach ($purp as $g => $rows) {
+            foreach ($rows as $pu => $row) {
+                fputcsv($out, array_merge([$g, csv_txt($pu)], array_map(function ($d) use ($row) { return $row[$d] ?? 0; }, array_keys($days)), [array_sum($row)]), ';');
+            }
+        }
+    }
     fclose($out);
     exit;
 }
@@ -244,6 +258,29 @@ topbar('report', 'Monitoring Laptop');
       <?php endforeach; ?>
     </table>
   </section>
+
+  <?php if ($purp): ?>
+  <section class="card">
+    <h2><?= icon('tag') ?> QR unik per peruntukan per hari</h2>
+    <div class="table-wrap"><table class="table small daily-table">
+      <thead><tr><th>Group · peruntukan</th><?php foreach ($days as $d => $x): ?><th class="right"><?= h(substr(tgl($d), 0, -5)) ?></th><?php endforeach; ?><th class="right">Total</th></tr></thead>
+      <tbody>
+      <?php foreach ($purp as $g => $rows): $gsum = []; ?>
+      <tr class="daily-grp"><td colspan="<?= count($days) + 2 ?>"><b><?= h($g) ?></b><?= $rows ? '' : ' <small class="muted">belum ada QR berhasil</small>' ?></td></tr>
+      <?php foreach ($rows as $pu => $row): foreach ($row as $d => $n) $gsum[$d] = ($gsum[$d] ?? 0) + $n; ?>
+      <tr<?= $pu === NO_PURPOSE ? ' class="muted"' : '' ?>><td class="daily-ind"><?= h($pu) ?></td>
+        <?php foreach ($days as $d => $x): ?><td class="right mono"><?= $row[$d] ?? '<span class="muted">0</span>' ?></td><?php endforeach; ?>
+        <td class="right mono"><b><?= array_sum($row) ?></b></td></tr>
+      <?php endforeach; ?>
+      <?php if (count($rows) > 1): ?>
+      <tr class="rep-total"><td class="daily-ind">Total <?= h($g) ?></td><?php foreach ($days as $d => $x): ?><td class="right mono"><?= $gsum[$d] ?? 0 ?></td><?php endforeach; ?><td class="right mono"><b><?= array_sum($gsum) ?></b></td></tr>
+      <?php endif; ?>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+    <p class="muted small">Peruntukan dari scan berhasil pertama tiap QR di hari itu (agent 1.20+). Scan dari agent lama masuk <b><?= NO_PURPOSE ?></b>.</p>
+  </section>
+  <?php endif; ?>
 
   <?php if ($gate_mx): ksort($gate_mx); ?>
   <section class="card">

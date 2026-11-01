@@ -41,6 +41,7 @@ $dev = (int)($_GET['device'] ?? 0);
 $cat = trim((string)($_GET['category'] ?? ''));
 $gate = trim((string)($_GET['gate'] ?? ''));
 $grp = trim((string)($_GET['grp'] ?? ''));
+$peru = mb_substr(trim((string)($_GET['peru'] ?? '')), 0, 100);     // peruntukan ("Tanpa peruntukan" = kosong)
 $search = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);      // cari ID QR (sebagian), menyaring daftar
 $code = mb_substr(trim((string)($_GET['code'] ?? '')), 0, 100);     // riwayat satu QR (semua tanggal)
 
@@ -50,6 +51,7 @@ $base = [$w, $p];                                   // tanpa filter kategori/gat
 if ($dev) { $w .= " AND device_id = ?"; $p[] = $dev; }
 if ($cat !== '') { $w .= " AND category = ?"; $p[] = $cat; }
 if ($gate !== '') { $w .= " AND gate = ?"; $p[] = $gate; }
+if ($peru !== '') { $w .= " AND peruntukan = ?"; $p[] = $peru === NO_PURPOSE ? '' : $peru; }
 if ($grp !== '') {   // group = daftar kategorinya; "Tanpa group" = kategori yang belum dipetakan (termasuk scan gagal tanpa kategori)
     $in_grp = array_keys(array_filter($gmap, function ($g) use ($grp) { return $g === $grp; }));
     $list = $grp === NO_GROUP ? array_keys($gmap) : $in_grp;
@@ -59,14 +61,14 @@ if ($grp !== '') {   // group = daftar kategorinya; "Tanpa group" = kategori yan
 function q($sql, $params) { global $pdo; $st = $pdo->prepare($sql); $st->execute($params); return $st; }
 $S = "\x1f";   // pemisah GROUP_CONCAT (tidak mungkin ada di data)
 $names = array_column($pdo->query("SELECT id, name FROM devices")->fetchAll(), 'name', 'id');
-$qs = http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'grp' => $grp, 'category' => $cat, 'gate' => $gate, 'q' => $search], function ($v) { return $v !== null && $v !== ''; }));
+$qs = http_build_query(array_filter(['from' => $from, 'to' => $to, 'device' => $dev ?: null, 'grp' => $grp, 'category' => $cat, 'peru' => $peru, 'gate' => $gate, 'q' => $search], function ($v) { return $v !== null && $v !== ''; }));
 function code_link($c) { global $qs; return '<a class="rep-code" data-code="' . h($c) . '" href="report.php?' . h($qs . '&code=' . rawurlencode($c)) . '" title="Lihat riwayat scan"><code>' . h($c) . '</code></a>'; }
 
 // ---------- riwayat scan satu QR (isi modal): semua tanggal, tidak terbatas filter ----------
 function history_html($code) {
     global $pdo;
     $names = array_column($pdo->query("SELECT id, name FROM devices")->fetchAll(), 'name', 'id');
-    $hist = q("SELECT scanned_at, status, category, gate, device_id FROM scans WHERE code = ? ORDER BY scanned_at, id", [$code])->fetchAll();
+    $hist = q("SELECT scanned_at, status, category, peruntukan, gate, device_id FROM scans WHERE code = ? ORDER BY scanned_at, id", [$code])->fetchAll();
     $place = function ($r) use ($names) { return ($r['gate'] ?: '–') . ' · ' . ($names[$r['device_id']] ?? 'laptop terhapus'); };
     ob_start(); ?>
     <div class="modal-head"><h3><?= icon('pulse') ?> Riwayat scan <code><?= h($code) ?></code></h3><button type="button" class="icon-btn sm" data-hist-close aria-label="Tutup">✕</button></div>
@@ -83,7 +85,7 @@ function history_html($code) {
         <div><span>Di-scan di</span><b><?= h(implode(', ', array_unique(array_map($place, $hist)))) ?></b></div>
       </div>
       <div class="table-wrap"><table class="table small">
-        <tr><th>No</th><th>Waktu</th><th>Status</th><th>Kategori</th><th>Gate</th><th>Laptop</th><th>Keterangan</th></tr>
+        <tr><th>No</th><th>Waktu</th><th>Status</th><th>Kategori</th><th>Peruntukan</th><th>Gate</th><th>Laptop</th><th>Keterangan</th></tr>
         <?php $seen = false; foreach ($hist as $i => $r):
             $ok = $r['status'] === 'success';
             $note = $ok ? (!$seen ? '<span class="badge ok-badge">Dihitung</span>' : '<span class="badge warn-badge">Ganda</span>') : '<span class="muted">tidak dihitung</span>';
@@ -93,6 +95,7 @@ function history_html($code) {
           <td class="mono"><?= h($r['scanned_at']) ?></td>
           <td><span class="state <?= $ok ? 'ok' : 'offline' ?>"><i></i><?= h(STATUS_LABEL[$r['status']] ?? $r['status']) ?></span></td>
           <td><?= h($r['category'] ?: '–') ?><?= $r['category'] !== '' ? ' <small class="muted">· ' . h(grp_of($r['category'])) . '</small>' : '' ?></td>
+          <td><?= h($r['peruntukan'] ?: '–') ?></td>
           <td><?= h($r['gate'] ?: '–') ?></td>
           <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
           <td><?= $note ?></td>
@@ -115,7 +118,7 @@ if (isset($_GET['history'])) {
 
 // ---------- daftar bertingkat halaman (server-side): u = QR unik berhasil, f = QR gagal yang tidak pernah berhasil ----------
 // Parameter per daftar di URL (ikut dipakai muat ulang otomatis): {t}p halaman, {t}n baris, {t}o kolom urut, {t}d arah, {t}q cari.
-const LIST_COLS = ['u' => ['first_at', 'code', 'category', 'gate', 'n'], 'f' => ['last_at', 'code', 'last_status', 'n']];
+const LIST_COLS = ['u' => ['first_at', 'code', 'category', 'peruntukan', 'gate', 'n'], 'f' => ['last_at', 'code', 'last_status', 'n']];
 const LIST_SIZES = [10, 25, 50, 100];
 function list_state($t) {
     global $search;
@@ -138,6 +141,7 @@ function list_fetch(array &$s) {
         $s['found'] = $like ? (int)q($cnt . $like, $lp)->fetchColumn() : $s['all'];
         $sql = "SELECT code, COUNT(*) AS n, MIN(scanned_at) AS first_at, MAX(scanned_at) AS last_at,
             SUBSTRING_INDEX(GROUP_CONCAT(category ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS category,
+            SUBSTRING_INDEX(GROUP_CONCAT(peruntukan ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS peruntukan,
             SUBSTRING_INDEX(GROUP_CONCAT(gate ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS gate,
             SUBSTRING_INDEX(GROUP_CONCAT(device_id ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS device_id
             FROM scans WHERE $w AND status = 'success' AND code <> ''$like GROUP BY code";
@@ -178,7 +182,7 @@ function list_section($t) {
     </div>
     <div class="table-wrap"><table class="table small rep-ltable">
       <?php if ($t === 'u'): ?>
-      <thead><tr><?= $th('', 'No') . $th('code', 'ID QR') . $th('', 'Group') . $th('category', 'Kategori') . $th('gate', 'Gate') . $th('', 'Laptop') . $th('first_at', 'Pertama berhasil') . $th('n', 'Scan berhasil', 'right') ?></tr></thead>
+      <thead><tr><?= $th('', 'No') . $th('code', 'ID QR') . $th('', 'Group') . $th('category', 'Kategori') . $th('peruntukan', 'Peruntukan') . $th('gate', 'Gate') . $th('', 'Laptop') . $th('first_at', 'Pertama berhasil') . $th('n', 'Scan berhasil', 'right') ?></tr></thead>
       <tbody>
       <?php foreach ($rows as $i => $r): ?>
       <tr<?= $r['code'] === $code ? ' class="rep-sel"' : '' ?>>
@@ -186,6 +190,7 @@ function list_section($t) {
         <td><?= code_link($r['code']) ?></td>
         <td><?= h(grp_of($r['category'])) ?></td>
         <td><?= h($r['category'] ?: '–') ?></td>
+        <td><?= h($r['peruntukan'] ?: '–') ?></td>
         <td><?= h($r['gate'] ?: '–') ?></td>
         <td><?= h($names[$r['device_id']] ?? 'laptop terhapus') ?></td>
         <td class="mono"><?= h(substr($r['first_at'], $from === $to ? 11 : 0)) ?></td>
@@ -201,7 +206,7 @@ function list_section($t) {
         <td class="right"><?= (int)$r['n'] ?></td><td class="mono"><?= h($r['last_at']) ?></td></tr>
       <?php endforeach; ?>
       <?php endif; ?>
-      <?php if (!$rows): ?><tr><td colspan="8" class="muted rep-empty"><?= $s['q'] !== '' ? 'Tidak ada ID QR yang mengandung "' . h($s['q']) . '".' : ($t === 'u' ? 'Belum ada QR yang berhasil di periode / filter ini.' : 'Tidak ada QR gagal di periode / filter ini.') ?></td></tr><?php endif; ?>
+      <?php if (!$rows): ?><tr><td colspan="9" class="muted rep-empty"><?= $s['q'] !== '' ? 'Tidak ada ID QR yang mengandung "' . h($s['q']) . '".' : ($t === 'u' ? 'Belum ada QR yang berhasil di periode / filter ini.' : 'Tidak ada QR gagal di periode / filter ini.') ?></td></tr><?php endif; ?>
       </tbody>
     </table></div>
     <div class="rep-pager">
@@ -237,20 +242,42 @@ if (isset($_GET['list']) && isset(LIST_COLS[$_GET['list']])) {
 // ---------- QR unik berhasil: satu baris per QR, atribut dari scan berhasil pertama ----------
 $uniq = q("SELECT code, COUNT(*) AS n, MIN(scanned_at) AS first_at, MAX(scanned_at) AS last_at,
     SUBSTRING_INDEX(GROUP_CONCAT(category ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS category,
+    SUBSTRING_INDEX(GROUP_CONCAT(peruntukan ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS peruntukan,
     SUBSTRING_INDEX(GROUP_CONCAT(gate ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS gate,
     SUBSTRING_INDEX(GROUP_CONCAT(device_id ORDER BY scanned_at, id SEPARATOR '$S'), '$S', 1) AS device_id
     FROM scans WHERE $w AND status = 'success' AND code <> '' GROUP BY code ORDER BY first_at, code", $p)->fetchAll();
 
+// QR unik per group -> peruntukan -> kategori (ASIC, EXH, dan group lain yang punya peruntukan)
+$purp = purpose_matrix($uniq);
+
 // ---------- unduh CSV (Excel, pemisah ;) ----------
+if (($_GET['csv'] ?? '') === 'peruntukan') {   // rekap per group peruntukan & kategori
+    $fn = 'laporan-peruntukan-' . $from . ($to !== $from ? '_sd_' . $to : '') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $fn . '"');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, ['Group', 'Peruntukan', 'Kategori', 'QR unik', '% dari group'], ';');
+    foreach ($purp as $g => $rows) {
+        $gt = array_sum(array_map('array_sum', $rows));
+        foreach ($rows as $pu => $cats) {
+            foreach ($cats as $c => $n) fputcsv($out, [$g, csv_txt($pu), csv_txt($c), $n, $gt ? round($n / $gt * 100, 1) : 0], ';');
+            if (count($cats) > 1) fputcsv($out, [$g, csv_txt($pu), 'SUBTOTAL', array_sum($cats), $gt ? round(array_sum($cats) / $gt * 100, 1) : 0], ';');
+        }
+        fputcsv($out, [$g, 'TOTAL', '', $gt, $gt ? 100 : 0], ';');
+    }
+    fclose($out);
+    exit;
+}
 if (!empty($_GET['csv'])) {
     $fn = 'laporan-scan-' . $from . ($to !== $from ? '_sd_' . $to : '') . '.csv';
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $fn . '"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, ['No', 'ID QR', 'Group', 'Kategori', 'Gate', 'Laptop', 'Pertama berhasil', 'Terakhir berhasil', 'Jumlah scan berhasil'], ';');
+    fputcsv($out, ['No', 'ID QR', 'Group', 'Kategori', 'Peruntukan', 'Gate', 'Laptop', 'Pertama berhasil', 'Terakhir berhasil', 'Jumlah scan berhasil'], ';');
     foreach ($uniq as $i => $r) {
-        fputcsv($out, [$i + 1, $r['code'], grp_of($r['category']), $r['category'], $r['gate'], $names[$r['device_id']] ?? '', $r['first_at'], $r['last_at'], $r['n']], ';');
+        fputcsv($out, [$i + 1, csv_txt($r['code']), grp_of($r['category']), csv_txt($r['category']), csv_txt($r['peruntukan']), csv_txt($r['gate']), $names[$r['device_id']] ?? '', $r['first_at'], $r['last_at'], $r['n']], ';');
     }
     fclose($out);
     exit;
@@ -318,6 +345,7 @@ if ($code === '' && $search !== '') {
 // pilihan filter (dari data periode ini)
 $opt_dev = $pdo->query("SELECT DISTINCT d.id, d.name FROM devices d JOIN scans s ON s.device_id = d.id ORDER BY d.name")->fetchAll();
 $opt_cat = q("SELECT DISTINCT category FROM scans WHERE {$base[0]} AND category <> '' ORDER BY category", $base[1])->fetchAll(PDO::FETCH_COLUMN);
+$opt_peru = q("SELECT DISTINCT peruntukan FROM scans WHERE {$base[0]} AND peruntukan <> '' ORDER BY peruntukan", $base[1])->fetchAll(PDO::FETCH_COLUMN);
 $opt_gate = q("SELECT DISTINCT gate FROM scans WHERE {$base[0]} AND gate <> '' ORDER BY gate", $base[1])->fetchAll(PDO::FETCH_COLUMN);
 
 function bars($rows, $total) {
@@ -357,6 +385,9 @@ topbar('report', 'Monitoring Laptop');
       <label>Laptop <select name="device"><option value="0">Semua laptop</option><?php foreach ($opt_dev as $o): ?><option value="<?= $o['id'] ?>" <?= $dev === (int)$o['id'] ? 'selected' : '' ?>><?= h($o['name']) ?></option><?php endforeach; ?></select></label>
       <label>Group <select name="grp"><option value="">Semua group</option><?php foreach (array_merge($grp_names, [NO_GROUP]) as $o): ?><option <?= $grp === $o ? 'selected' : '' ?>><?= h($o) ?></option><?php endforeach; ?></select></label>
       <label>Kategori <select name="category"><option value="">Semua kategori</option><?php foreach ($opt_cat as $o): ?><option <?= $cat === $o ? 'selected' : '' ?>><?= h($o) ?></option><?php endforeach; ?></select></label>
+      <?php if ($opt_peru || $peru !== ''): ?>
+      <label>Peruntukan <select name="peru"><option value="">Semua peruntukan</option><?php foreach (array_merge($opt_peru, [NO_PURPOSE]) as $o): ?><option <?= $peru === $o ? 'selected' : '' ?>><?= h($o) ?></option><?php endforeach; ?></select></label>
+      <?php endif; ?>
       <label>Gate <select name="gate"><option value="">Semua gate</option><?php foreach ($opt_gate as $o): ?><option <?= $gate === $o ? 'selected' : '' ?>><?= h($o) ?></option><?php endforeach; ?></select></label>
       <button class="btn btn-primary">Tampilkan</button>
       <a class="btn" href="report.php">Hari ini</a>
@@ -398,6 +429,46 @@ topbar('report', 'Monitoring Laptop');
     </table></div>
     <?php if ($unmapped): ?><p class="notice warn-notice small">Kategori belum punya group: <b><?= h(implode(', ', $unmapped)) ?></b>.<?= is_supervisor() ? ' Klik <b>Atur group</b> untuk memetakannya.' : '' ?></p><?php endif; ?>
     <p class="muted small">Scan gagal (tidak ditemukan) tidak membawa kategori, jadi tidak bisa dipecah per group.</p>
+  </section>
+
+  <section class="card" id="peruntukan">
+    <div class="table-tools">
+      <h2><?= icon('tag') ?> QR unik per peruntukan</h2>
+      <a class="btn" href="report.php?<?= h($qs) ?>&amp;csv=peruntukan"><?= icon('download') ?> Unduh CSV peruntukan</a>
+    </div>
+    <div class="rep-purp">
+      <?php foreach ($purp as $g => $rows):
+          $cats = [];
+          foreach ($rows as $cs) $cats = array_merge($cats, array_keys($cs));
+          $cats = array_values(array_unique($cats)); sort($cats);
+          $gt = array_sum(array_map('array_sum', $rows));
+          $pmax = $rows ? max(array_map('array_sum', $rows)) : 1; ?>
+      <div class="rep-purp-g">
+        <h3><?= h($g) ?> <span class="badge"><?= $gt ?> QR unik</span></h3>
+        <?php if (!$rows): ?>
+        <p class="muted small">Belum ada QR <?= h($g) ?> yang berhasil di periode / filter ini.</p>
+        <?php else: ?>
+        <div class="table-wrap"><table class="table small rep-purp-t">
+          <thead><tr><th>Peruntukan</th><?php foreach ($cats as $c): ?><th class="right"><?= h($c) ?></th><?php endforeach; ?><?php if (count($cats) > 1): ?><th class="right">Total</th><?php endif; ?><th class="rep-purp-bar"></th></tr></thead>
+          <tbody>
+          <?php foreach ($rows as $pu => $cs): $n = array_sum($cs);
+              $link = 'report.php?' . http_build_query(array_merge(['from' => $from, 'to' => $to], $dev ? ['device' => $dev] : [], ['grp' => $g, 'peru' => $pu])); ?>
+          <tr<?= $pu === NO_PURPOSE ? ' class="muted"' : '' ?>><td><a href="<?= h($link) ?>" title="Tampilkan QR <?= h($g) ?> dengan peruntukan ini"><?= h($pu) ?></a></td>
+            <?php foreach ($cats as $c): ?><td class="right mono"><?= $cs[$c] ?? '<span class="muted">0</span>' ?></td><?php endforeach; ?>
+            <?php if (count($cats) > 1): ?><td class="right mono"><b><?= $n ?></b></td><?php endif; ?>
+            <td class="rep-bar rep-purp-bar"><i style="width:<?= round($n / max(1, $pmax) * 100, 1) ?>%"></i><small class="muted mono"><?= round($n / max(1, $gt) * 100) ?>%</small></td></tr>
+          <?php endforeach; ?>
+          <tr class="rep-total"><td><b>Total</b></td>
+            <?php foreach ($cats as $c): ?><td class="right mono"><?= array_sum(array_column($rows, $c)) ?></td><?php endforeach; ?>
+            <?php if (count($cats) > 1): ?><td class="right mono"><b><?= $gt ?></b></td><?php endif; ?><td></td></tr>
+          </tbody>
+        </table></div>
+        <?php endif; ?>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <p class="muted small">Peruntukan dibaca agent 1.20+ dari balasan scan (field <code><?= h(setting('scan_purpose_key')) ?></code>, menu Pengaturan) dari scan berhasil pertama tiap QR.
+      Scan dari agent lama / sebelum fitur ini masuk <b><?= NO_PURPOSE ?></b>. Klik peruntukan untuk melihat daftar QR-nya.</p>
   </section>
 
   <div class="settings-grid">

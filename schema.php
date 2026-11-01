@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 10;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19)
+const SCHEMA_VERSION = 11;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20)
 
 function schema_version(PDO $pdo) {
     try {
@@ -157,6 +157,8 @@ function schema_apply(PDO $pdo) {
   UNIQUE KEY dev_sid (device_id, sid),
   INDEX dev_time (device_id, scanned_at),
   INDEX scan_time (scanned_at)");
+    // peruntukan dari balasan scan (agent >= 1.20; mis. kategori ASIC / EXH), untuk laporan per peruntukan
+    $add('scans', $cols('scans'), 'peruntukan', "ADD peruntukan VARCHAR(100) NOT NULL DEFAULT '' AFTER category");
     $table('commands', "
   id INT AUTO_INCREMENT PRIMARY KEY,
   device_id INT NOT NULL,

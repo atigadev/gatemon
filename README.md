@@ -172,6 +172,9 @@ Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
   (menu Pengaturan, bawaan `form-scanning-gate`, boleh beberapa dipisah koma). Laptop dengan link lain / mode monitor
   tidak membuka port debug, datanya ditolak server, dan tidak menampilkan data scan. Laptop scan diberi label "Scan" di Devices.
 - Disimpan di tabel `scans`: status, kategori (hanya bila berhasil), gate, ID QR/barcode, waktu. Nama & perusahaan TIDAK disimpan.
+- Agent 1.20+ juga menyimpan **peruntukan** (field `peruntukan` di balasan scan, mis. kategori ASIC / EXH; nama field bisa
+  diubah di Pengaturan `scan_purpose_key`). Laporan scan & laporan per hari punya rekap per group (ASIC, EXH) ×
+  peruntukan × kategori, filter peruntukan, dan CSV peruntukan.
 - Scan ditampung di agent saat server tidak terjangkau dan dikirim bersama heartbeat; kiriman ulang tidak tercatat dobel.
 - Dashboard: "Scan hari ini" per card + total, riwayat 15 scan di panel detail, peringatan suara bila scan
   "tidak ditemukan" >= ambang per menit. Pengaturan: tangkap scan on/off, lama simpan (bawaan 30 hari), ambang (bawaan 5).

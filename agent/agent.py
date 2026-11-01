@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -980,12 +980,13 @@ def auto_gate(j):
 
 # ---------- tangkap hasil scan halaman gate ----------
 # Agent mendengarkan balasan proses_scan_gate.php di browser gate lewat Chrome DevTools Protocol (port lokal).
-# Yang disimpan HANYA: status, kategori, gate, ID QR/barcode (yang di-scan), waktu. Nama & perusahaan diabaikan.
+# Yang disimpan HANYA: status, kategori, peruntukan, gate, ID QR/barcode (yang di-scan), waktu. Nama & perusahaan diabaikan.
 # Antrean bertahan selama server tidak terjangkau dan dikirim bersama heartbeat berikutnya.
 CDP_PORT = int(CFG.get("cdp_port", 9333))
 scan_capture = False                                   # hanya "laptop scan" (ditentukan server lewat heartbeat)
 SCAN_PAGE = ["form-scanning-gate"]                    # pola URL halaman scan  (menu Pengaturan)
 SCAN_API = ["proses_scan_gate"]                        # pola URL proses scan   (menu Pengaturan)
+SCAN_PURPOSE = ["peruntukan"]                          # nama field peruntukan di balasan scan (menu Pengaturan)
 
 
 def url_match(url, patterns):
@@ -997,13 +998,27 @@ LOCAL = requests.Session()
 LOCAL.trust_env = False                                # akses 127.0.0.1 tidak boleh lewat proxy sistem
 
 
-def add_scan(info, status, category=""):
+def add_scan(info, status, category="", purpose=""):
     item = {"sid": "%d-%s" % (int(info["t"] * 1000), os.urandom(3).hex()), "t": int(info["t"]),
             "gate": str(info.get("gate", ""))[:50], "status": status,
-            "category": str(category or "")[:100], "code": str(info.get("code", ""))[:100]}
+            "category": str(category or "")[:100], "peruntukan": str(purpose or "")[:100],
+            "code": str(info.get("code", ""))[:100]}
     with _scan_lock:
         SCAN_Q.append(item)
-    log.info("scan %s %s %s", item["status"], item["code"], item["category"])
+    log.info("scan %s %s %s %s", item["status"], item["code"], item["category"], item["peruntukan"])
+
+
+def scan_purpose(resp):
+    # field peruntukan (nama dari menu Pengaturan, huruf besar/kecil diabaikan), di balasan langsung atau 1 tingkat di dalamnya
+    keys = [k.lower() for k in SCAN_PURPOSE]
+    for obj in [resp] + [v for v in resp.values() if isinstance(v, dict)]:
+        for k, v in obj.items():
+            if str(k).lower() in keys and v not in (None, "", [], {}):
+                if isinstance(v, (list, tuple)):
+                    v = ", ".join(str(x) for x in v if x not in (None, ""))
+                v = re.sub(r"<[^>]*>", " ", str(v))               # buang tag HTML bila ada
+                return re.sub(r"\s+", " ", v).strip()[:100]
+    return ""
 
 
 def scan_status(resp):
@@ -1067,7 +1082,8 @@ def scan_watcher():
                     try:
                         resp = json.loads(body.strip().lstrip("﻿"))
                         st = scan_status(resp)
-                        add_scan(info, st, resp.get("category", "") if st == "success" else "")
+                        ok = st == "success"
+                        add_scan(info, st, resp.get("category", "") if ok else "", scan_purpose(resp) if ok else "")
                     except Exception:
                         add_scan(info, "error")
                 for rid in [r for r, i in pending.items() if time.time() - i["t"] > 60]:
@@ -2514,6 +2530,8 @@ def main():
                     SCAN_PAGE[:] = [str(p).lower() for p in j["scan_page_match"]]
                 if j.get("scan_api_match"):
                     SCAN_API[:] = [str(p).lower() for p in j["scan_api_match"]]
+                if j.get("scan_purpose_keys"):
+                    SCAN_PURPOSE[:] = [str(p).lower() for p in j["scan_purpose_keys"]]
                 ack = set(j.get("scans_ack") or [])
                 if ack:                                          # hapus dari antrean hanya yang sudah diterima server
                     with _scan_lock:

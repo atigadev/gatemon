@@ -736,3 +736,12 @@ body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translate
 .sup-alarm-row.shut{background:rgba(0,0,0,.18);border-radius:10px;padding:6px 8px}
 .sup-alarm.only-shut{background:#b45309;animation:none;box-shadow:0 12px 40px -8px rgba(180,83,9,.7)}
 .sup-alarm .sup-alarm-row.shut .btn-light{color:#b45309}
+/* laporan per peruntukan (ASIC / EXH) */
+.rep-purp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}
+.rep-purp-g{border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;min-width:0}
+.rep-purp-g h3{margin:0 0 8px;font-size:15px;display:flex;gap:8px;align-items:center}
+.rep-purp-t td:first-child{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rep-purp-t td.rep-purp-bar{width:30%;min-width:110px;white-space:nowrap}
+.rep-purp-t td.rep-purp-bar i{display:inline-block;vertical-align:middle;margin-right:6px;max-width:calc(100% - 40px)}
+.daily-table tr.daily-grp td{background:var(--surface-2)}
+.daily-table td.daily-ind{padding-left:22px}
