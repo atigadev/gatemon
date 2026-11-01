@@ -360,6 +360,8 @@ const SUPPORT_MIN = '1.11.0';    // agent mulai versi ini punya tombol Chat Supp
 const SUPPORT_ACK_SHOW = 120;    // detik: laptop menampilkan "DITANGANI" selama ini setelah darurat ditangani
 const SUPPORT_KEEP_DAYS = 90;    // pesan yang lebih lama dihapus otomatis
 const SUPPORT_EMERGENCY_TEXT = 'DARURAT - petugas membutuhkan bantuan segera';
+const SUPPORT_SHUTDOWN_TEXT = 'Minta izin mematikan (shutdown) laptop ini';
+const SHUTDOWN_REQ_MIN = '1.19.0';   // agent mulai versi ini punya tombol "Minta shutdown" (disetujui petugas/supervisor)
 const SUPPORT_SHOW_MIN = '1.12.0';   // agent mulai versi ini menerima perintah "tampilkan tombol / buka chat" dan melaporkan status tombol
 const SUPPORT_MODES = ['' => 'Ikut menu Pengaturan', '1' => 'Selalu tampil', '0' => 'Sembunyikan'];
 // Tombol tampil di laptop ini? Pilihan per laptop (menu Support) mengalahkan menu Pengaturan
@@ -380,11 +382,20 @@ function support_hb($d) {
         FROM support_msgs WHERE device_id=?");
     $st->execute([$d['id']]);
     $r = $st->fetch();
-    return ['on' => 1, 'last' => (int)$r['last'], 'emg' => $r['open'] ? 'open' : ($r['ack'] ? 'ack' : '')];
+    return ['on' => 1, 'last' => (int)$r['last'], 'emg' => $r['open'] ? 'open' : ($r['ack'] ? 'ack' : ''), 'shut' => shutdown_state($d['id'])];
+}
+// Permintaan shutdown terakhir laptop ini: pending (menunggu), approved / rejected (diputuskan dalam SUPPORT_ACK_SHOW detik terakhir), atau kosong
+function shutdown_state($device_id) {
+    $st = db()->prepare("SELECT ack_at, decision, ack_at >= NOW() - INTERVAL " . SUPPORT_ACK_SHOW . " SECOND AS recent FROM support_msgs WHERE device_id=? AND kind='shutdown' ORDER BY id DESC LIMIT 1");
+    $st->execute([$device_id]);
+    $r = $st->fetch();
+    if (!$r) return '';
+    if ($r['ack_at'] === null) return 'pending';
+    return $r['recent'] && in_array($r['decision'], ['approved', 'rejected'], true) ? $r['decision'] : '';
 }
 // Pesan percakapan satu laptop: id > $since (urut lama -> baru); $since 0 = 50 pesan terakhir
 function support_msgs($device_id, $since) {
-    $cols = "id, sender, author, kind, body, created_at, read_at IS NOT NULL AS seen, ack_at, ack_by";
+    $cols = "id, sender, author, kind, body, created_at, read_at IS NOT NULL AS seen, ack_at, ack_by, decision";
     if ($since > 0) {
         $st = db()->prepare("SELECT $cols FROM support_msgs WHERE device_id=? AND id>? ORDER BY id LIMIT 200");
         $st->execute([$device_id, $since]);

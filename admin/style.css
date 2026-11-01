@@ -725,3 +725,14 @@ body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translate
   .daily-heat td[style]{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   @page{size:A4 landscape;margin:10mm}
 }
+
+/* permintaan shutdown dari laptop (agent 1.19): kuning, diputuskan petugas/supervisor */
+.sup-emg.sup-shut{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
+.sup-emg.sup-shut b{animation:none}
+.sup-emg.sup-shut .btn + .btn{margin-left:0}
+.sup-conv.shut{border-color:var(--warn);background:var(--warn-bg)}
+.msg.shut{background:var(--warn-bg);border-color:var(--warn)}
+.msg.shut .msg-body{color:var(--warn);font-weight:700}
+.sup-alarm-row.shut{background:rgba(0,0,0,.18);border-radius:10px;padding:6px 8px}
+.sup-alarm.only-shut{background:#b45309;animation:none;box-shadow:0 12px 40px -8px rgba(180,83,9,.7)}
+.sup-alarm .sup-alarm-row.shut .btn-light{color:#b45309}

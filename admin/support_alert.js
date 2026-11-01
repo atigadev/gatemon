@@ -1,11 +1,11 @@
-// Alarm DARURAT & pesan baru dari laptop (menu Support) di semua halaman admin.
+// Alarm DARURAT, permintaan shutdown & pesan baru dari laptop (menu Support) di semua halaman admin.
 // Darurat: banner merah + sirene berulang + kalimat dibacakan sampai ditangani (atau didiamkan di browser ini).
 // Berbunyi walau suara peringatan lain dimatikan. Browser baru mengizinkan suara setelah halaman diklik sekali.
 (function(){
   const me = document.currentScript, CSRF = me.dataset.csrf, SUP = ['supervisor', 'operator'].includes(me.dataset.role);   // boleh menangani darurat
   const KEY = 'gm_sup_quiet';               // id darurat yang didiamkan di browser ini
   const onSupport = !!document.getElementById('sup');
-  let quiet = load(), emg = [], lastId = null, ctx = null, nextSay = 0, stopped = false;
+  let quiet = load(), emg = [], shut = [], lastId = null, ctx = null, nextSay = 0, stopped = false;
 
   function load(){ try{ return JSON.parse(localStorage.getItem(KEY) || '[]'); }catch(e){ return []; } }
   function save(){ try{ localStorage.setItem(KEY, JSON.stringify(quiet.slice(-50))); }catch(e){} }
@@ -41,9 +41,10 @@
   }
   function banner(){
     let box = document.getElementById('sup-alarm');
-    if(!emg.length){ if(box) box.remove(); document.body.classList.remove('sup-alarm-on'); return; }
+    if(!emg.length && !shut.length){ if(box) box.remove(); document.body.classList.remove('sup-alarm-on'); return; }
     if(!box){ box = el('div', 'sup-alarm'); box.id = 'sup-alarm'; box.setAttribute('role', 'alert'); document.body.append(box); }
     document.body.classList.add('sup-alarm-on');
+    box.classList.toggle('only-shut', !emg.length);   // hanya permintaan shutdown: banner kuning, tanpa kedip
     box.replaceChildren();
     emg.forEach(e => {
       const row = el('div', 'sup-alarm-row' + (quiet.includes(+e.id) ? ' quiet' : ''));
@@ -51,6 +52,18 @@
       const go = el('a', 'btn', 'Buka chat'); go.href = 'support.php?dev=' + e.device_id; row.append(go);
       if(SUP){ const a = el('button', 'btn btn-light', 'Tangani'); a.type = 'button'; a.dataset.supAck = e.device_id; row.append(a); }
       if(!quiet.includes(+e.id)){ const q = el('button', 'btn btn-ghost', 'Diamkan'); q.type = 'button'; q.dataset.supQuiet = e.id; q.title = 'Matikan bunyi darurat ini di browser ini saja'; row.append(q); }
+      box.append(row);
+    });
+    // permintaan shutdown dari laptop: menunggu keputusan petugas/supervisor (tanpa sirene)
+    shut.forEach(s => {
+      const row = el('div', 'sup-alarm-row shut');
+      row.append(el('b', '', '⏻ MINTA SHUTDOWN'), el('span', 'sup-alarm-who', s.name + [s.category_name, s.gate].filter(Boolean).map(x => ' · ' + x).join('')), el('small', '', 'sejak ' + hm(s.created_at)));
+      const go = el('a', 'btn', 'Buka chat'); go.href = 'support.php?dev=' + s.device_id; row.append(go);
+      if(SUP){
+        const y = el('button', 'btn btn-light', 'Setujui'); y.type = 'button'; y.dataset.supShut = s.device_id; y.dataset.decision = 'approve'; y.dataset.name = s.name;
+        const n = el('button', 'btn btn-ghost', 'Tolak'); n.type = 'button'; n.dataset.supShut = s.device_id; n.dataset.decision = 'reject';
+        row.append(y, n);
+      }
       box.append(row);
     });
     if(!unlocked() && emg.some(e => !quiet.includes(+e.id))) box.append(el('div', 'sup-alarm-hint', 'Klik di mana saja pada halaman ini agar alarm berbunyi.'));
@@ -65,8 +78,14 @@
       const j = await r.json(); if(!j.ok) return;
       const before = emg.map(e => +e.id);
       emg = j.emergencies;
+      const beforeShut = shut.map(s => +s.id);
+      shut = j.shutdowns || [];
+      shut.filter(s => !beforeShut.includes(+s.id)).forEach(s => {
+        if(window.gmPopup) gmPopup({level: 'warn', title: '⏻ Minta izin shutdown: ' + s.name, text: [s.category_name, s.gate, 'sejak ' + hm(s.created_at), SUP ? 'Setujui atau tolak di banner bawah / menu Support.' : ''].filter(Boolean).join(' · '), href: 'support.php?dev=' + s.device_id});
+        if(lastId !== null){ chime(); setTimeout(() => say((window.speakName ? speakName(s.name) : s.name) + ' meminta izin shutdown.'), 700); }
+      });
       quiet = quiet.filter(id => emg.some(e => +e.id === id) || !before.includes(id)); save();
-      badge(j.unread + emg.length, emg.length > 0);
+      badge(j.unread + emg.length + shut.length, emg.length > 0);
       const fresh = emg.filter(e => !before.includes(+e.id));
       if(fresh.length) nextSay = 0;   // darurat baru: langsung bunyi
       fresh.forEach(e => window.gmPopup && gmPopup({level: 'bad', title: '🚨 DARURAT: ' + e.name, text: [e.category_name, e.gate, 'minta bantuan sejak ' + hm(e.created_at)].filter(Boolean).join(' · '), href: 'support.php?dev=' + e.device_id}));
@@ -94,6 +113,19 @@
     audio();
     const q = e.target.closest('[data-sup-quiet]');
     if(q){ quiet.push(+q.dataset.supQuiet); save(); if(window.speechSynthesis) speechSynthesis.cancel(); banner(); return; }
+    const sd = e.target.closest('[data-sup-shut]');
+    if(sd){
+      const ok = sd.dataset.decision === 'approve';
+      if(ok && !confirm('Setujui permintaan shutdown dari ' + sd.dataset.name + '?\nLaptop akan DIMATIKAN dan harus dinyalakan manual.')) return;
+      sd.disabled = true;
+      try{
+        const r = await fetch('support_api.php', {method: 'POST', credentials: 'same-origin', headers: {'X-CSRF': CSRF},
+          body: new URLSearchParams({act: 'shutdown', dev: sd.dataset.supShut, decision: sd.dataset.decision, csrf: CSRF})});
+        const j = await r.json(); if(!j.ok) throw new Error(j.error);
+        if(window.gmPopup) gmPopup({level: ok ? 'warn' : 'info', title: ok ? 'Shutdown disetujui' : 'Permintaan shutdown ditolak', text: ok ? (j.offline ? 'Laptop sedang offline: dimatikan saat tersambung lagi.' : 'Laptop dimatikan dalam beberapa detik.') : 'Laptop tetap menyala.'});
+      }catch(err){ alert('Gagal: ' + err.message); }
+      poll(); return;
+    }
     const a = e.target.closest('[data-sup-ack]');
     if(a){
       a.disabled = true;

@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 9;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator)
+const SCHEMA_VERSION = 10;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19)
 
 function schema_version(PDO $pdo) {
     try {
@@ -219,16 +219,24 @@ function schema_apply(PDO $pdo) {
   device_id INT NOT NULL,
   sender ENUM('agent','admin','system') NOT NULL,
   author VARCHAR(50) NOT NULL DEFAULT '',
-  kind ENUM('chat','emergency') NOT NULL DEFAULT 'chat',
+  kind ENUM('chat','emergency','shutdown') NOT NULL DEFAULT 'chat',
   body VARCHAR(1000) NOT NULL,
   cid VARCHAR(40) NULL,
   created_at DATETIME NOT NULL,
   read_at DATETIME NULL,
   ack_at DATETIME NULL,
   ack_by VARCHAR(50) NULL,
+  decision ENUM('approved','rejected','cancelled') NULL,
   UNIQUE KEY dev_cid (device_id, cid),
   INDEX dev_id (device_id, id),
   INDEX kind_ack (kind, ack_at)");
+    // Permintaan shutdown dari laptop (agent >= 1.19): kind shutdown, diputuskan petugas/supervisor (ack_at/ack_by + decision)
+    $sm = $cols('support_msgs');
+    if (strpos($sm['kind'] ?? '', 'shutdown') === false) {
+        $pdo->exec("ALTER TABLE support_msgs MODIFY kind ENUM('chat','emergency','shutdown') NOT NULL DEFAULT 'chat'");
+        $done[] = 'permintaan shutdown dari laptop ditambahkan';
+    }
+    $add('support_msgs', $sm, 'decision', "ADD decision ENUM('approved','rejected','cancelled') NULL AFTER ack_by");
 
     // Kategori bawaan hanya untuk database baru (kategori yang sengaja dihapus tidak muncul lagi)
     if ($fresh) {

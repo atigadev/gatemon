@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.18.0"
+VERSION = "1.19.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1149,7 +1149,7 @@ def report(cmd_id, status, result):
 SUP_STATE = os.path.join(BASE, "support-state.json")
 SUP = requests.Session()                      # sesi sendiri: thread support tidak berbagi koneksi dengan heartbeat
 SUP.headers.update(HEADERS)
-_sup = {"on": False, "last": 0, "max": 0, "seen": 0, "emg": "", "msgs": [], "status": "", "err": "", "started": False, "visible": False}
+_sup = {"on": False, "last": 0, "max": 0, "seen": 0, "emg": "", "shut": "", "msgs": [], "status": "", "err": "", "started": False, "visible": False}
 _sup_lock = threading.Lock()
 _sup_out = collections.deque()                # kiriman yang belum diterima server
 _sup_wake = threading.Event()
@@ -1237,6 +1237,8 @@ def sup_send(kind, text=""):
         _sup_out.append({"kind": kind, "text": text, "cid": cid, "user": os.environ.get("USERNAME", "")})
         if kind == "emergency":
             _sup["emg"] = "sending"
+        elif kind in ("shutdown", "shutdown_cancel"):
+            _sup["shut"] = "sending"
         _sup["status"] = "Mengirim…"
     _sup_wake.set()
     _sup_post()
@@ -1264,7 +1266,13 @@ def sup_worker():
                         _sup_out.popleft()
                         if m["kind"] == "emergency":
                             _sup["emg"] = "open"
-                        _sup["status"] = "Darurat terkirim, support segera datang" if m["kind"] == "emergency" else "Terkirim"
+                        elif m["kind"] == "shutdown":
+                            _sup["shut"] = "pending"
+                        elif m["kind"] == "shutdown_cancel":
+                            _sup["shut"] = ""
+                        _sup["status"] = {"emergency": "Darurat terkirim, support segera datang",
+                                          "shutdown": "Permintaan shutdown terkirim, menunggu persetujuan petugas",
+                                          "shutdown_cancel": "Permintaan shutdown dibatalkan"}.get(m["kind"], "Terkirim")
                     _sup_wake.set()                              # ambil pesan yang baru tersimpan
                 elif r.status_code == 429:                       # terlalu cepat: dicoba lagi nanti
                     _sup["status"] = j.get("error") or "Tunggu sebentar"
@@ -1274,6 +1282,8 @@ def sup_worker():
                         _sup_out.popleft()
                         if m["kind"] == "emergency":
                             _sup["emg"] = ""
+                        elif m["kind"] in ("shutdown", "shutdown_cancel"):
+                            _sup["shut"] = ""
                         _sup["status"] = "Gagal: " + str(j.get("error") or r.status_code)
                 else:
                     raise RuntimeError("HTTP %s" % r.status_code)
@@ -1290,6 +1300,8 @@ def sup_worker():
                         del _sup["msgs"][:-200]
                         if _sup["emg"] != "sending":
                             _sup["emg"] = str(j.get("emg") or "")
+                        if _sup["shut"] != "sending":
+                            _sup["shut"] = str(j.get("shut") or "")
                         if show and _sup["seen"] < _sup["max"]:
                             _sup["seen"] = _sup["max"]
                             _sup_save()
@@ -1303,12 +1315,14 @@ def sup_worker():
 
 
 def support_sync(s):
-    """Dari balasan heartbeat: aktif/tidak (menu Pengaturan), id pesan support terakhir, status darurat."""
+    """Dari balasan heartbeat: aktif/tidak (menu Pengaturan), id pesan support terakhir, status darurat & permintaan shutdown."""
     on = bool(s.get("on")) and IS_WIN
     with _sup_lock:
         _sup["last"] = int(s.get("last") or 0)
         if on and _sup["emg"] != "sending":
             _sup["emg"] = str(s.get("emg") or "")
+        if on and _sup["shut"] != "sending":
+            _sup["shut"] = str(s.get("shut") or "")
     _sup["on"] = on
     if on and not _sup["started"]:
         _sup["started"] = True
@@ -1374,9 +1388,12 @@ def support_show(chat):
 
 
 class SupportUI:
-    BAR_W, CHAT_W, SOS_W, GAP, BAR_H, MARGIN = 150, 150, 124, 8, 40, 14
+    # Tombol di pojok kanan bawah: biasanya hanya satu tombol "Support" (MAIN_W). Diklik -> terbuka menu
+    # Chat Support | DARURAT | Minta Shutdown | x, dan menutup lagi sendiri setelah AUTO_CLOSE detik tanpa klik.
+    MAIN_W, CHAT_W, SOS_W, SHUT_W, X_W, GAP, BAR_H, MARGIN, AUTO_CLOSE = 150, 150, 124, 150, 40, 8, 40, 14, 15
     KEY = 0xFF00FF                                     # warna transparan di sekitar tombol (COLORREF 0x00BBGGRR)
-    C = {"blue": 0xEB6325, "amber": 0x0B9EF5, "amber2": 0x0677D9, "red": 0x2626DC, "red2": 0x1C1C99, "green": 0x4AA316}
+    C = {"blue": 0xEB6325, "amber": 0x0B9EF5, "amber2": 0x0677D9, "red": 0x2626DC, "red2": 0x1C1C99, "green": 0x4AA316,
+         "slate": 0x695547, "slate2": 0x8B7464}
     ID_SEND, ID_CANCEL, ID_LOG, ID_INPUT, ID_STATUS = 1, 2, 10, 11, 12
 
     def __init__(self):
@@ -1414,7 +1431,8 @@ class SupportUI:
             ("SetForegroundWindow", [W.HWND], W.BOOL), ("SetFocus", [W.HWND], W.HWND), ("MessageBeep", [W.UINT], W.BOOL),
             ("GetDlgItem", [W.HWND, I], W.HWND), ("SystemParametersInfoW", [W.UINT, W.UINT, W.LPVOID, W.UINT], W.BOOL),
             ("AdjustWindowRectEx", [P(W.RECT), W.DWORD, W.BOOL, W.DWORD], W.BOOL),
-            ("UnregisterClassW", [W.LPCWSTR, W.HINSTANCE], W.BOOL), ("RegisterHotKey", [W.HWND, I, W.UINT, W.UINT], W.BOOL)]:
+            ("UnregisterClassW", [W.LPCWSTR, W.HINSTANCE], W.BOOL), ("RegisterHotKey", [W.HWND, I, W.UINT, W.UINT], W.BOOL),
+            ("MessageBoxW", [W.HWND, W.LPCWSTR, W.LPCWSTR, W.UINT], I)]:
             f = getattr(u, fn)
             f.argtypes, f.restype = args, res
         for fn, args, res in [
@@ -1434,6 +1452,7 @@ class SupportUI:
         self.bar = self.chat = None
         self.items, self.lay, self.scroll, self.log_h = None, [], 0, 0      # riwayat chat (bubble)
         self.last_pos = None
+        self.expanded, self.exp_at = False, 0.0                           # menu tombol terbuka + waktu klik terakhir
 
     # ---------- persiapan: DPI, gaya kontrol Windows modern ----------
     def _setup(self):
@@ -1496,7 +1515,7 @@ class SupportUI:
         self._bar_proc, self._chat_proc = self.WNDPROC(self.bar_proc), self.WNDPROC(self.chat_proc)   # disimpan: jangan sampai dibuang GC
         self.register("GateMonSupportBar", self._bar_proc, 32649)     # IDC_HAND
         self.register("GateMonSupportChat", self._chat_proc, 32512)   # IDC_ARROW
-        bw, bh = self.s(self.CHAT_W + self.GAP + self.SOS_W), self.s(self.BAR_H)
+        bw, bh = self.bar_w(), self.s(self.BAR_H)
         # WS_EX_TOPMOST | TOOLWINDOW (tanpa ikon taskbar) | NOACTIVATE (tidak mengambil fokus) | LAYERED (sudut transparan)
         self.bar = u.CreateWindowExW(0x8 | 0x80 | 0x08000000 | 0x80000, "GateMonSupportBar", "GateMon Support", 0x80000000,
                                      0, 0, bw, bh, None, None, self.hinst, None)
@@ -1534,7 +1553,7 @@ class SupportUI:
         self.h_status = mk("STATIC", "", 0, 0, p, ch - s(86), cw - 2 * p, s(20), self.ID_STATUS)
         self.h_input = mk("EDIT", "", 0x00010000 | 0x80, 0x200, p, ch - s(60), cw - 2 * p - s(90) - m, s(30), self.ID_INPUT)   # TABSTOP AUTOHSCROLL
         self.h_send = mk("BUTTON", "Kirim", 0x00010000 | 0x1, 0, cw - p - s(90), ch - s(60), s(90), s(30), self.ID_SEND)  # DEFPUSHBUTTON
-        mk("STATIC", "Enter = kirim  ·  Esc = tutup  ·  Darurat: tombol merah", 0, 0, p, ch - s(24), cw - 2 * p, s(18), 13)
+        mk("STATIC", "Enter = kirim  ·  Esc = tutup  ·  Darurat / shutdown: tombol Support", 0, 0, p, ch - s(24), cw - 2 * p, s(18), 13)
         for h in (self.h_log, self.h_status, self.h_input, self.h_send, u.GetDlgItem(self.chat, 13)):
             u.SendMessageW(h, 0x30, self.f_ui or 0, 1)                           # WM_SETFONT
         u.SendMessageW(self.h_input, 0xC5, 500, 0)                               # EM_SETLIMITTEXT
@@ -1543,32 +1562,63 @@ class SupportUI:
         u.SendMessageW(self.h_input, 0x1501, 1, ctypes.addressof(cue))           # EM_SETCUEBANNER
 
     # ---------- tampilan ----------
+    def bar_w(self):
+        if self.expanded:
+            return self.s(self.CHAT_W + self.SOS_W + self.SHUT_W + self.X_W + 3 * self.GAP)
+        return self.s(self.MAIN_W)
+
     def buttons(self):
+        """[(x1, x2, teks, warna, aksi)] sesuai keadaan: tertutup = satu tombol yang menunjukkan status terpenting."""
+        C, bl = self.C, self.blink
         n = sup_unread()
+        e, sh = _sup["emg"], _sup["shut"]
         if n:
-            chat = ("Pesan baru (%d)" % n, self.C["amber"] if self.blink else self.C["amber2"])
+            chat = ("Pesan baru (%d)" % n, C["amber"] if bl else C["amber2"])
         else:
-            chat = ("Chat Support", self.C["blue"])
-        e = _sup["emg"]
-        sos = {"sending": ("MENGIRIM…", self.C["red2"] if self.blink else self.C["red"]),
-               "open": ("TERKIRIM ✓", self.C["red"] if self.blink else self.C["red2"]),
-               "ack": ("DITANGANI ✓", self.C["green"])}.get(e, ("DARURAT", self.C["red"]))
+            chat = ("Chat Support", C["blue"])
+        sos = {"sending": ("MENGIRIM…", C["red2"] if bl else C["red"]),
+               "open": ("TERKIRIM ✓", C["red"] if bl else C["red2"]),
+               "ack": ("DITANGANI ✓", C["green"])}.get(e, ("DARURAT", C["red"]))
+        shut = {"sending": ("MENGIRIM…", C["slate2"] if bl else C["slate"]),
+                "pending": ("Batalkan shutdown", C["amber"] if bl else C["amber2"]),
+                "approved": ("Disetujui ✓", C["green"]),
+                "rejected": ("Ditolak", C["slate"])}.get(sh, ("Minta Shutdown", C["slate"]))
         s = self.s
-        return [(0, s(self.CHAT_W)) + chat, (s(self.CHAT_W + self.GAP), s(self.CHAT_W + self.GAP + self.SOS_W)) + sos]
+        if not self.expanded:
+            if e in ("sending", "open"):
+                main = sos
+            elif sh in ("sending", "pending"):
+                main = ("Menunggu izin…", C["amber"] if bl else C["amber2"])
+            elif sh == "approved":
+                main = ("Shutdown disetujui", C["green"])
+            elif n:
+                main = chat
+            elif e == "ack":
+                main = sos
+            elif sh == "rejected":
+                main = ("Shutdown ditolak", C["slate"])
+            else:
+                main = ("☰  Support", C["blue"])
+            return [(0, s(self.MAIN_W)) + main + ("open",)]
+        out, x = [], 0
+        for w, b, act in ((self.CHAT_W, chat, "chat"), (self.SOS_W, sos, "sos"), (self.SHUT_W, shut, "shut"), (self.X_W, ("✕", C["slate"]), "close")):
+            out.append((s(x), s(x + w)) + b + (act,))
+            x += w + self.GAP
+        return out
 
     def paint_bar(self, hwnd):
         u, g = self.u, self.g
         ps = self.PAINTSTRUCT()
         hdc = u.BeginPaint(hwnd, ctypes.byref(ps))
         h = self.s(self.BAR_H)
-        full = self.W.RECT(0, 0, self.s(self.CHAT_W + self.GAP + self.SOS_W), h)
+        full = self.W.RECT(0, 0, self.bar_w(), h)
         key = g.CreateSolidBrush(self.KEY)
         u.FillRect(hdc, ctypes.byref(full), key)
         g.DeleteObject(key)
         g.SetBkMode(hdc, 1)                                                      # TRANSPARENT
         g.SetTextColor(hdc, 0xFFFFFF)
         old_font = g.SelectObject(hdc, self.f_bar)
-        for x1, x2, text, color in self.buttons():
+        for x1, x2, text, color, _ in self.buttons():
             br, pen = g.CreateSolidBrush(color), g.CreatePen(0, 1, color)
             ob, op = g.SelectObject(hdc, br), g.SelectObject(hdc, pen)
             g.RoundRect(hdc, x1, 0, x2, h, h, h)
@@ -1582,13 +1632,14 @@ class SupportUI:
     def place(self, force=False):
         u, s = self.u, self.s
         l, t, r, b = self.work_area()
-        bw, bh = s(self.CHAT_W + self.GAP + self.SOS_W), s(self.BAR_H)
-        x, y = r - bw - s(self.MARGIN), b - bh - s(self.MARGIN)
+        bw, bh = self.bar_w(), s(self.BAR_H)
+        x, y = r - bw - s(self.MARGIN), b - bh - s(self.MARGIN)                  # rata kanan: menu terbuka ke kiri
+        y_chat = b - s(self.BAR_H) - s(self.MARGIN)
         u.SetWindowPos(self.bar, self.W.HWND(-1), x, y, bw, bh, 0x10 | 0x40)    # HWND_TOPMOST, NOACTIVATE | SHOWWINDOW
-        if force or self.last_pos != (x, y):
-            self.last_pos = (x, y)
+        if force or self.last_pos != (r, y_chat):
+            self.last_pos = (r, y_chat)
             cw, chh = self.chat_size
-            u.SetWindowPos(self.chat, self.W.HWND(-1), max(l, r - cw - s(self.MARGIN)), max(t, y - chh - s(8)), 0, 0, 0x1 | 0x10)  # NOSIZE | NOACTIVATE
+            u.SetWindowPos(self.chat, self.W.HWND(-1), max(l, r - cw - s(self.MARGIN)), max(t, y_chat - chh - s(8)), 0, 0, 0x1 | 0x10)  # NOSIZE | NOACTIVATE
 
     # ---------- riwayat chat: bubble seperti aplikasi chat (kanan = petugas, kiri = support, tengah = info) ----------
     # warna COLORREF 0x00BBGGRR
@@ -1754,8 +1805,12 @@ class SupportUI:
             new = [m for m in list(_sup["msgs"]) if m["sender"] != "agent" and m["id"] > self.beeped]
             if new:
                 u.MessageBeep(0x40)
-                who = speak_name(new[-1].get("author") or "")
-                speak("Ada pesan masuk dari support" + (", " + who if who else "") + ".")
+                last = new[-1]
+                if last["sender"] == "system":                                   # mis. "Permintaan shutdown disetujui oleh ..."
+                    speak(str(last.get("body") or "")[:160])
+                else:
+                    who = speak_name(last.get("author") or "")
+                    speak("Ada pesan masuk dari support" + (", " + who if who else "") + ".")
         self.beeped = max(self.beeped, _sup["max"])
         if _sup["visible"]:
             items = self.chat_items()
@@ -1767,6 +1822,10 @@ class SupportUI:
                 st = "DARURAT terkirim, menunggu support…" + ("" if st.startswith("Darurat") or not st else "  ·  " + st)
             elif _sup["emg"] == "ack":
                 st = "DARURAT ditangani, support menuju lokasi."
+            elif _sup["shut"] == "pending":
+                st = "Permintaan shutdown menunggu persetujuan petugas…"
+            elif _sup["shut"] == "approved":
+                st = "Shutdown disetujui: laptop dimatikan dalam beberapa detik."
             u.SetWindowTextW(self.h_status, st)
 
     def toggle_chat(self):
@@ -1810,6 +1869,26 @@ class SupportUI:
         self.u.MessageBeep(0x30)
         sup_send("emergency")
 
+    def set_expanded(self, on):
+        self.expanded, self.exp_at = bool(on), time.time()
+        self.refresh()
+
+    def shutdown_request(self):
+        """Minta izin shutdown ke server (petugas/supervisor memutuskan), atau batalkan permintaan yang masih menunggu."""
+        st = _sup["shut"]
+        if st in ("sending", "approved"):
+            return
+        title = "GateMon - Shutdown laptop"
+        flags = 0x4 | 0x100 | 0x10000 | 0x40000                                    # YESNO | DEFBUTTON2 (Tidak) | SETFOREGROUND | TOPMOST
+        if st == "pending":
+            if self.u.MessageBoxW(None, "Permintaan shutdown masih menunggu persetujuan petugas.\n\nBatalkan permintaan ini?", title, flags | 0x30) == 6:
+                sup_send("shutdown_cancel")
+            return
+        if self.u.MessageBoxW(None, "Minta izin mematikan (shutdown) laptop ini?\n\nPermintaan dikirim ke petugas operator. Laptop baru "
+                                    "dimatikan setelah disetujui. Simpan pekerjaan Anda lebih dulu.", title, flags | 0x20) == 6:
+            log.info("minta izin shutdown ke server")
+            sup_send("shutdown")
+
     # ---------- pesan jendela ----------
     def bar_proc(self, hwnd, msg, wp, lp):
         try:
@@ -1820,15 +1899,29 @@ class SupportUI:
                 return 0
             if msg == 0x202:                                                     # WM_LBUTTONUP
                 x = ctypes.c_short(lp & 0xFFFF).value
-                if x < self.s(self.CHAT_W):
+                act = next((b[4] for b in self.buttons() if b[0] <= x < b[1]), None)
+                if act == "open":
+                    self.set_expanded(True)
+                elif act == "chat":
+                    self.set_expanded(False)
                     self.toggle_chat()
-                elif x >= self.s(self.CHAT_W + self.GAP):
+                elif act == "sos":
+                    self.exp_at = time.time()                                    # tetap terbuka: petugas melihat "TERKIRIM"
                     self.emergency()
+                elif act == "shut":
+                    self.exp_at = time.time()
+                    self.shutdown_request()
+                    self.set_expanded(False)
+                elif act == "close":
+                    self.set_expanded(False)
                 return 0
             if msg == 0x113:                                                     # WM_TIMER: kedip + tetap paling atas
                 self.tick += 1
                 self.blink = not self.blink
-                if self.tick % 4 == 0 or sup_unread() or _sup["emg"] in ("sending", "open"):
+                if self.expanded and time.time() - self.exp_at > self.AUTO_CLOSE:   # menu menutup sendiri
+                    self.expanded = False
+                    self.refresh()
+                elif self.tick % 4 == 0 or sup_unread() or _sup["emg"] in ("sending", "open") or _sup["shut"] in ("sending", "pending"):
                     self.refresh()
                 return 0
             if msg == 0x8001:                                                    # WM_APP+1 dari thread lain

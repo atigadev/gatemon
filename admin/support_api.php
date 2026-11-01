@@ -3,7 +3,8 @@
 // GET  act=alert                 -> darurat yang belum ditangani + jumlah pesan belum dibaca (dipolling semua halaman admin)
 // GET  act=convs                 -> daftar percakapan per laptop
 // GET  act=thread&dev=ID&since=  -> pesan baru satu laptop (pesan dari laptop ditandai dibaca)
-// POST act=send (dev, text) / act=ack (dev) / act=mode (dev, mode) / act=show (dev, chat) / act=show_all   -> CSRF; send & ack: petugas/supervisor, lainnya supervisor
+// POST act=send (dev, text) / act=ack (dev) / act=shutdown (dev, decision approve|reject) / act=mode (dev, mode) / act=show (dev, chat) / act=show_all
+//      -> CSRF; send, ack, shutdown: petugas/supervisor, lainnya supervisor
 require __DIR__ . '/auth.php';
 if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
 $pdo = db();
@@ -26,7 +27,7 @@ function sup_device($id) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // balas chat & tangani darurat: petugas juga boleh; atur/tampilkan tombol di laptop: supervisor saja
-    in_array($act, ['send', 'ack'], true) ? require_operator_json() : require_supervisor_json();
+    in_array($act, ['send', 'ack', 'shutdown'], true) ? require_operator_json() : require_supervisor_json();
     check_csrf();
     $who = current_user()['username'];
     $cmd = $pdo->prepare("INSERT INTO commands (device_id, type, payload, status, created_by, created_at) VALUES (?, 'SUPPORT_SHOW', ?, 'pending', ?, NOW())");
@@ -77,6 +78,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         json_out(['ok' => true, 'n' => $st->rowCount()]);
     }
+    // permintaan shutdown dari laptop: disetujui -> perintah SHUTDOWN dikirim (petugas boleh, karena diminta dari laptop itu sendiri), atau ditolak
+    if ($act === 'shutdown') {
+        $ok = ($_POST['decision'] ?? '') === 'approve';
+        $st = $pdo->prepare("UPDATE support_msgs SET ack_at=NOW(), ack_by=?, decision=? WHERE device_id=? AND kind='shutdown' AND ack_at IS NULL");
+        $st->execute([$who, $ok ? 'approved' : 'rejected', $d['id']]);
+        if (!$st->rowCount()) json_out(['ok' => false, 'error' => 'tidak ada permintaan shutdown yang menunggu (mungkin sudah diputuskan atau dibatalkan)'], 409);
+        if ($ok) {
+            $pdo->prepare("INSERT INTO commands (device_id, type, payload, status, created_by, created_at) VALUES (?, 'SHUTDOWN', '', 'pending', ?, NOW())")->execute([$d['id'], $who]);
+            $msg = "Permintaan shutdown disetujui oleh $who. Laptop dimatikan dalam beberapa detik.";
+            log_event($d['id'], 'warn', "{$d['name']}: permintaan shutdown DISETUJUI oleh $who, perintah SHUTDOWN dikirim");
+        } else {
+            $msg = "Permintaan shutdown ditolak oleh $who. Laptop tetap menyala.";
+            log_event($d['id'], 'info', "{$d['name']}: permintaan shutdown ditolak oleh $who");
+        }
+        $pdo->prepare("INSERT INTO support_msgs (device_id, sender, author, kind, body, created_at) VALUES (?, 'system', ?, 'chat', ?, NOW())")->execute([$d['id'], $who, $msg]);
+        json_out(['ok' => true, 'approved' => $ok, 'offline' => $d['state'] !== 'online']);
+    }
     json_out(['ok' => false, 'error' => 'aksi tidak dikenal'], 400);
 }
 
@@ -86,20 +104,23 @@ if ($act === 'alert') {
     $emg = $pdo->query("SELECT m.id, m.device_id, m.body, m.created_at, d.name, d.gate, c.name AS category_name
         FROM support_msgs m JOIN devices d ON d.id=m.device_id LEFT JOIN categories c ON c.id=d.category_id
         WHERE m.kind='emergency' AND m.ack_at IS NULL ORDER BY m.id")->fetchAll();
+    $shut = $pdo->query("SELECT m.id, m.device_id, m.author, m.created_at, d.name, d.gate, c.name AS category_name
+        FROM support_msgs m JOIN devices d ON d.id=m.device_id LEFT JOIN categories c ON c.id=d.category_id
+        WHERE m.kind='shutdown' AND m.ack_at IS NULL ORDER BY m.id")->fetchAll();
     $unread = (int)$pdo->query("SELECT COUNT(*) FROM support_msgs WHERE sender='agent' AND read_at IS NULL")->fetchColumn();
     $last = $pdo->query("SELECT m.id, m.device_id, m.body, d.name FROM support_msgs m JOIN devices d ON d.id=m.device_id
-        WHERE m.sender='agent' ORDER BY m.id DESC LIMIT 1")->fetch() ?: null;
-    json_out(['ok' => true, 'role' => current_user()['role'], 'unread' => $unread, 'emergencies' => $emg, 'last' => $last]);
+        WHERE m.sender='agent' AND m.kind='chat' ORDER BY m.id DESC LIMIT 1")->fetch() ?: null;
+    json_out(['ok' => true, 'role' => current_user()['role'], 'unread' => $unread, 'emergencies' => $emg, 'shutdowns' => $shut, 'last' => $last]);
 }
 
 if ($act === 'convs') {
     // laptop dengan pesan 7 hari terakhir atau darurat yang belum ditangani
     $convs = $pdo->query("SELECT m.device_id, d.name, d.gate, d.last_seen, c.name AS category_name, c.color AS category_color,
             MAX(m.id) last_id, MAX(m.created_at) last_at, SUM(m.sender='agent' AND m.read_at IS NULL) unread,
-            SUM(m.kind='emergency' AND m.ack_at IS NULL) emg
+            SUM(m.kind='emergency' AND m.ack_at IS NULL) emg, SUM(m.kind='shutdown' AND m.ack_at IS NULL) shut
         FROM support_msgs m JOIN devices d ON d.id=m.device_id LEFT JOIN categories c ON c.id=d.category_id
-        WHERE m.created_at >= NOW() - INTERVAL 7 DAY OR (m.kind='emergency' AND m.ack_at IS NULL)
-        GROUP BY m.device_id ORDER BY SUM(m.kind='emergency' AND m.ack_at IS NULL) > 0 DESC, MAX(m.id) DESC")->fetchAll();
+        WHERE m.created_at >= NOW() - INTERVAL 7 DAY OR (m.kind IN ('emergency', 'shutdown') AND m.ack_at IS NULL)
+        GROUP BY m.device_id ORDER BY SUM(m.kind IN ('emergency', 'shutdown') AND m.ack_at IS NULL) > 0 DESC, MAX(m.id) DESC")->fetchAll();
     $off = setting('offline_after');
     $lastmsg = [];
     if ($convs) {
@@ -113,7 +134,7 @@ if ($act === 'convs') {
         $c['last_body'] = mb_substr($m['body'], 0, 80);
         $c['last_sender'] = $m['sender'];
         $c['state'] = $c['last_seen'] && time() - strtotime($c['last_seen']) <= $off ? 'online' : 'offline';
-        foreach (['device_id', 'last_id', 'unread', 'emg'] as $k) $c[$k] = (int)$c[$k];
+        foreach (['device_id', 'last_id', 'unread', 'emg', 'shut'] as $k) $c[$k] = (int)$c[$k];
         unset($c['last_seen']);
     }
     unset($c);
@@ -133,10 +154,13 @@ if ($act === 'thread') {
     $st = $pdo->prepare("SELECT MIN(created_at) FROM support_msgs WHERE device_id=? AND kind='emergency' AND ack_at IS NULL");
     $st->execute([$d['id']]);
     $emg_open = $st->fetchColumn() ?: null;
+    $st = $pdo->prepare("SELECT MIN(created_at) FROM support_msgs WHERE device_id=? AND kind='shutdown' AND ack_at IS NULL");
+    $st->execute([$d['id']]);
+    $shut_open = $st->fetchColumn() ?: null;
     $st = $pdo->prepare("SELECT status, LEFT(result, 200) result, created_at FROM commands WHERE device_id=? AND type='SUPPORT_SHOW' ORDER BY id DESC LIMIT 1");
     $st->execute([$d['id']]);
     unset($d['last_seen']);
-    json_out(['ok' => true, 'device' => $d, 'msgs' => $msgs, 'seen_upto' => $seen, 'emg_open' => $emg_open, 'show_cmd' => $st->fetch() ?: null,
+    json_out(['ok' => true, 'device' => $d, 'msgs' => $msgs, 'seen_upto' => $seen, 'emg_open' => $emg_open, 'shut_open' => $shut_open, 'show_cmd' => $st->fetch() ?: null,
         'global_on' => (bool)setting('support_overlay')]);
 }
 json_out(['ok' => false, 'error' => 'aksi tidak dikenal'], 400);

@@ -31,10 +31,11 @@
       convsEl.replaceChildren();
       if(!j.convs.length) convsEl.append(el('p', 'muted', 'Belum ada pesan 7 hari terakhir.'));
       j.convs.forEach(c => {
-        const b = el('button', 'sup-conv' + (c.device_id === dev ? ' cur' : '') + (c.emg ? ' emg' : '')); b.type = 'button'; b.dataset.dev = c.device_id;
+        const b = el('button', 'sup-conv' + (c.device_id === dev ? ' cur' : '') + (c.emg ? ' emg' : c.shut ? ' shut' : '')); b.type = 'button'; b.dataset.dev = c.device_id;
         const top = el('div', 'sup-conv-top');
         top.append(el('span', 'dot ' + (c.state === 'online' ? 'ok' : 'off')), el('b', '', c.name));
         if(c.emg) top.append(el('span', 'badge bad', 'DARURAT'));
+        else if(c.shut) top.append(el('span', 'badge warn-badge', 'MINTA SHUTDOWN'));
         else if(c.unread) top.append(el('span', 'badge sup', c.unread));
         top.append(el('small', 'muted', hm(c.last_at)));
         const sub = el('div', 'sup-conv-sub muted', [c.category_name, c.gate].filter(Boolean).join(' · '));
@@ -78,10 +79,18 @@
     const emg = el('div', 'sup-emg'); emg.hidden = true; emg.id = 'sup-emg';
     emg.append(el('b', '', 'DARURAT belum ditangani'), el('span', 'muted', ''));
     if(OP){ const a = el('button', 'btn btn-danger', 'Tangani sekarang'); a.type = 'button'; a.id = 'sup-ack'; emg.append(a); }
+    // permintaan shutdown dari laptop: petugas/supervisor memutuskan
+    const shut = el('div', 'sup-emg sup-shut'); shut.hidden = true; shut.id = 'sup-shut';
+    shut.append(el('b', '', '⏻ Laptop minta izin SHUTDOWN'), el('span', 'muted', ''));
+    if(OP){
+      const y = el('button', 'btn btn-danger', 'Setujui & matikan'); y.type = 'button'; y.dataset.shut = 'approve';
+      const n = el('button', 'btn', 'Tolak'); n.type = 'button'; n.dataset.shut = 'reject';
+      shut.append(y, n);
+    }
     const warn = [];
     if(!d.supported) warn.push('Agent di laptop ini versi ' + (d.agent_version || '?') + ': belum punya tombol chat. Update agent ke 1.11 (menu Agent) agar pesan terlihat di laptop.');
     const list = el('div', 'sup-msgs'); list.id = 'sup-msgs';
-    main.append(head, emg);
+    main.append(head, emg, shut);
     warn.forEach(w => main.append(el('p', 'notice warn-notice small', w)));
     main.append(list);
     if(OP){
@@ -95,11 +104,12 @@
   }
   function bubble(m){
     const mine = m.sender === 'admin', sys = m.sender === 'system';
-    const b = el('div', 'msg ' + (sys ? 'sys' : mine ? 'me' : 'them') + (m.kind === 'emergency' ? ' emg' : '')); b.dataset.id = m.id;
+    const b = el('div', 'msg ' + (sys ? 'sys' : mine ? 'me' : 'them') + (m.kind === 'emergency' ? ' emg' : m.kind === 'shutdown' ? ' shut' : '')); b.dataset.id = m.id;
     if(!sys) b.append(el('div', 'msg-who', mine ? 'Support' + (m.author ? ' (' + m.author + ')' : '') : 'Laptop' + (m.author ? ' · ' + m.author : '')));
-    b.append(el('div', 'msg-body', (m.kind === 'emergency' ? '🚨 ' : '') + m.body));
+    b.append(el('div', 'msg-body', (m.kind === 'emergency' ? '🚨 ' : m.kind === 'shutdown' ? '⏻ ' : '') + m.body));
     const meta = el('div', 'msg-meta', hm(m.created_at));
     if(m.kind === 'emergency') meta.textContent += m.ack_at ? ' · ditangani ' + (m.ack_by || '') + ' ' + hm(m.ack_at) : ' · belum ditangani';
+    if(m.kind === 'shutdown') meta.textContent += !m.ack_at ? ' · menunggu keputusan' : ' · ' + ({approved: 'disetujui', rejected: 'ditolak', cancelled: 'dibatalkan'}[m.decision] || 'selesai') + ' ' + (m.ack_by || '') + ' ' + hm(m.ack_at);
     if(mine){ const s = el('span', 'msg-seen', ''); meta.append(s); }
     b.append(meta);
     return b;
@@ -146,6 +156,8 @@
       seenUpto = j.seen_upto; paintSeen();
       const box = document.getElementById('sup-emg');   // diatur sebelum menggulir: kotak ini mengubah tinggi daftar pesan
       if(box){ box.hidden = !j.emg_open; if(j.emg_open) box.querySelector('span').textContent = 'sejak ' + hm(j.emg_open); }
+      const sb = document.getElementById('sup-shut');
+      if(sb){ sb.hidden = !j.shut_open; if(j.shut_open) sb.querySelector('span').textContent = 'sejak ' + hm(j.shut_open) + (info.state !== 'online' ? ' · laptop offline' : ''); }
       if(j.msgs.length && atBottom) list.scrollTop = list.scrollHeight;
     }catch(e){
       if(want === dev && !info) main.replaceChildren(el('p', 'notice error', 'Gagal memuat: ' + e.message));
@@ -163,6 +175,16 @@
         await loadThread();
       }catch(err){ alert('Gagal: ' + err.message); }
       finally{ sh.disabled = false; }
+      return;
+    }
+    const sd = e.target.closest('[data-shut]');
+    if(sd){
+      const ok = sd.dataset.shut === 'approve';
+      if(ok && !confirm('Setujui permintaan shutdown dari ' + (info?.name || 'laptop ini') + '?\nLaptop akan DIMATIKAN dan harus dinyalakan manual.')) return;
+      sd.disabled = true;
+      try{ await api({act: 'shutdown', dev, decision: sd.dataset.shut}, true); window.GMSupport?.refresh(); info = null; since = 0; await loadThread(); loadConvs(); }
+      catch(err){ alert('Gagal: ' + err.message); }
+      finally{ sd.disabled = false; }
       return;
     }
     if(e.target.id === 'sup-ack'){

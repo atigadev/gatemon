@@ -9,7 +9,7 @@ topbar('support', 'Monitoring Laptop');
 ?>
 <main class="page">
   <div class="page-head"><div><h1>Support</h1>
-    <p class="muted">Pesan dari petugas lewat tombol <b>Chat Support</b> di pojok kanan bawah layar laptop, dan tombol <b>DARURAT</b>.
+    <p class="muted">Pesan dari petugas lewat tombol <b>Chat Support</b> di pojok kanan bawah layar laptop (menu <b>Support</b>), tombol <b>DARURAT</b>, dan <b>permintaan shutdown</b> yang disetujui / ditolak petugas.
       Alarm darurat berbunyi di semua halaman admin yang terbuka sampai ditangani.</p></div></div>
   <?php if (!setting('support_overlay')): ?><p class="notice warn-notice">Tombol support di laptop sedang <b>dinonaktifkan</b> di menu Pengaturan (kecuali laptop yang diatur "Selalu tampil" di sini).</p><?php endif; ?>
   <?php if (!is_operator()): ?><p class="notice">Akun viewer hanya bisa membaca. Membalas dan menangani darurat hanya untuk petugas / supervisor.</p><?php endif; ?>
@@ -25,4 +25,4 @@ topbar('support', 'Monitoring Laptop');
     </section>
   </div>
 </main>
-<?php page_foot(['support.js?v=3']);
+<?php page_foot(['support.js?v=5']);
