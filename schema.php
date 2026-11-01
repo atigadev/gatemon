@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 12;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12 = lengkapi peruntukan dari halaman cek undangan
+const SCHEMA_VERSION = 13;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan
 
 function schema_version(PDO $pdo) {
     try {
@@ -164,13 +164,28 @@ function schema_apply(PDO $pdo) {
         $pdo->exec("ALTER TABLE scans ADD INDEX code (code)");
         $done[] = 'index scans.code ditambahkan';
     }
-    $table('purpose_lookup', "
+    // charset/collation mengikuti tabel scans (dipakai JOIN scans.code = purpose_lookup.code): database hasil impor
+    // bisa punya collation tabel lama yang berbeda dari bawaan database -> "Illegal mix of collations"
+    $sc = $pdo->query("SELECT CHARACTER_SET_NAME, COLLATION_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'scans' AND COLUMN_NAME = 'code'")->fetch(PDO::FETCH_NUM);
+    $coll = $sc && preg_match('/^\w+$/', $sc[0] . $sc[1]) ? " DEFAULT CHARSET={$sc[0]} COLLATE={$sc[1]}" : '';
+    if (!in_array('purpose_lookup', $tables, true)) {
+        $pdo->exec("CREATE TABLE purpose_lookup (
   code VARCHAR(100) PRIMARY KEY,
   status ENUM('found','notfound','error') NOT NULL,
   peruntukan VARCHAR(100) NOT NULL DEFAULT '',
   category VARCHAR(100) NOT NULL DEFAULT '',
   err VARCHAR(200) NULL,
-  checked_at DATETIME NOT NULL");
+  checked_at DATETIME NOT NULL)$coll");
+        $done[] = 'tabel purpose_lookup dibuat';
+    } elseif ($sc) {
+        $pc = $pdo->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purpose_lookup' AND COLUMN_NAME = 'code'")->fetchColumn();
+        if ($pc && $pc !== $sc[1] && $coll !== '') {
+            $pdo->exec("ALTER TABLE purpose_lookup CONVERT TO CHARACTER SET {$sc[0]} COLLATE {$sc[1]}");
+            $done[] = 'collation purpose_lookup disamakan dengan scans';
+        }
+    }
     $table('commands', "
   id INT AUTO_INCREMENT PRIMARY KEY,
   device_id INT NOT NULL,

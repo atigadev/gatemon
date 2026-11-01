@@ -551,4 +551,4 @@ topbar('report', 'Monitoring Laptop');
   </div>
 </div>
 <?php endif; ?>
-<?php page_foot(['report.js?v=5', 'purpose_fill.js?v=1']);
+<?php page_foot(['report.js?v=5', 'purpose_fill.js?v=2']);

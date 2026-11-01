@@ -13,7 +13,8 @@
   }
   async function status(keep){
     try{
-      const j = await (await fetch('purpose_fill.php?act=status' + all(), {cache: 'no-store'})).json();
+      const r = await fetch('purpose_fill.php?act=status' + all(), {cache: 'no-store'});
+      const j = await r.json().catch(() => ({ok: false, error: 'HTTP ' + r.status}));
       if(!j.ok) throw new Error(j.error);
       counts(j);
       $('purp-run').disabled = !j.pending || !j.url_ok;

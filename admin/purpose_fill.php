@@ -9,7 +9,18 @@ require __DIR__ . '/auth.php';
 require_supervisor_json();
 require __DIR__ . '/report_groups.php';
 session_write_close();   // proses bisa lama: jangan menahan halaman lain di sesi yang sama
+// error ditampilkan ke supervisor (bukan "Terjadi kesalahan" saja) agar masalah di server bisa langsung terlihat
+set_exception_handler(function ($e) {
+    error_log('GateMon purpose_fill: ' . $e);
+    json_out(['ok' => false, 'error' => 'Kesalahan server: ' . mb_substr($e->getMessage(), 0, 300)], 500);
+});
 $pdo = db();
+// struktur belum diperbarui (migrasi otomatis gagal / belum jalan): coba sekali lagi, tampilkan alasannya bila tetap gagal
+if (!$pdo->query("SHOW TABLES LIKE 'purpose_lookup'")->fetchColumn()) {
+    require_once __DIR__ . '/../schema.php';
+    try { db_migrate($pdo); }
+    catch (Exception $e) { json_out(['ok' => false, 'error' => 'Struktur database belum diperbarui: ' . mb_substr($e->getMessage(), 0, 300)], 500); }
+}
 $act = $_REQUEST['act'] ?? '';
 $all = !empty($_REQUEST['all']);
 const FILL_BATCH = 8;        // ID per request
@@ -78,6 +89,7 @@ if ($act === 'status') {
 }
 if ($act === 'run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     check_csrf();
+    if (!function_exists('curl_init')) json_out(['ok' => false, 'error' => 'Ekstensi PHP curl belum aktif di server: buka C:\\xampp\\php\\php.ini, hapus ; di depan extension=curl, lalu restart Apache.'], 500);
     $url = lookup_url();
     if (!$url) json_out(['ok' => false, 'error' => 'Link cek peruntukan di menu Pengaturan tidak valid (harus https dan berisi {id}).'], 400);
     // satu proses sekaligus (dua tab / dua supervisor tidak mengecek ID yang sama)
