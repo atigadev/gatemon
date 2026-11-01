@@ -57,22 +57,51 @@ function lookup_url() {
     if (!preg_match('#^https://[^\s"\'<>]+$#i', $u) || strpos($u, '{id}') === false) return null;
     return $u;
 }
+// Ambil halaman https (maks 1 MB, tanpa redirect, sertifikat diverifikasi): [kode HTTP, isi, error].
+// Pakai ekstensi curl bila aktif; bila tidak, stream https bawaan PHP (ekstensi openssl).
+const FETCH_MAX = 1048576;   // halaman normal ~8 KB
+function can_fetch() { return function_exists('curl_init') || in_array('https', stream_get_wrappers(), true); }
+function ca_bundle() {
+    // php.ini tanpa openssl.cafile / curl.cainfo: pakai CA bundle bawaan XAMPP bila ada
+    foreach ([ini_get('openssl.cafile'), ini_get('curl.cainfo'), dirname(PHP_BINARY) . '/../apache/bin/curl-ca-bundle.crt',
+              'C:/xampp/apache/bin/curl-ca-bundle.crt', '/etc/ssl/certs/ca-certificates.crt'] as $f) {
+        if ($f && is_file($f)) return $f;
+    }
+    return null;
+}
+function http_fetch($url) {
+    $ca = ca_bundle();
+    if (function_exists('curl_init')) {
+        $body = '';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 10, CURLOPT_USERAGENT => 'GateMon',
+            CURLOPT_HTTPHEADER => ['Accept: text/html'],
+            CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$body) { $body .= $chunk; return strlen($body) > FETCH_MAX ? 0 : strlen($chunk); },
+        ] + ($ca ? [CURLOPT_CAINFO => $ca] : []));
+        $ok = curl_exec($ch);
+        $http = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        return [$ok === false ? 0 : $http, $body, $err];
+    }
+    $ctx = stream_context_create([
+        'http' => ['timeout' => 10, 'follow_location' => 0, 'ignore_errors' => true, 'header' => "Accept: text/html\r\nUser-Agent: GateMon\r\n"],
+        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true] + ($ca ? ['cafile' => $ca] : []),
+    ]);
+    $fp = @fopen($url, 'rb', false, $ctx);
+    if (!$fp) return [0, '', preg_replace('/^fopen\([^)]*\):\s*/', '', (string)(error_get_last()['message'] ?? 'gagal terhubung'))];
+    $body = (string)stream_get_contents($fp, FETCH_MAX);
+    $head = stream_get_meta_data($fp)['wrapper_data'] ?? [];
+    fclose($fp);
+    $http = preg_match('#^HTTP/\S+\s+(\d{3})#', (string)($head[0] ?? ''), $m) ? (int)$m[1] : 0;
+    return [$http, $body, $http ? '' : 'balasan tidak dikenal'];
+}
 // ambil halaman cek satu ID: [status, peruntukan, kategori, error]
 function lookup_one($url, $code) {
-    $body = '';
-    $ch = curl_init(str_replace('{id}', rawurlencode(trim($code)), $url));
-    curl_setopt_array($ch, [
-        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS, CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 10, CURLOPT_USERAGENT => 'GateMon',
-        CURLOPT_HTTPHEADER => ['Accept: text/html'],
-        // maks 1 MB: halaman normal ~8 KB
-        CURLOPT_WRITEFUNCTION => function ($ch, $chunk) use (&$body) { $body .= $chunk; return strlen($body) > 1048576 ? 0 : strlen($chunk); },
-    ]);
-    $ok = curl_exec($ch);
-    $http = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $err = curl_error($ch);
-    curl_close($ch);
-    if ($ok === false || $http !== 200) return ['error', '', '', mb_substr($err ?: "HTTP $http", 0, 200)];
+    [$http, $body, $err] = http_fetch(str_replace('{id}', rawurlencode(trim($code)), $url));
+    if ($http !== 200) return ['error', '', '', mb_substr($err ?: "HTTP $http", 0, 200)];
     $txt = function ($s) { return mb_substr(trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($s), ENT_QUOTES | ENT_HTML5, 'UTF-8'))), 0, 100); };
     $peru = '';
     if (preg_match('#class="[^"]*\bscan-peruntukan\b[^"]*"[^>]*>(.*?)</span>#is', $body, $m)) $peru = $txt($m[1]);
@@ -89,7 +118,7 @@ if ($act === 'status') {
 }
 if ($act === 'run' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     check_csrf();
-    if (!function_exists('curl_init')) json_out(['ok' => false, 'error' => 'Ekstensi PHP curl belum aktif di server: buka C:\\xampp\\php\\php.ini, hapus ; di depan extension=curl, lalu restart Apache.'], 500);
+    if (!can_fetch()) json_out(['ok' => false, 'error' => 'PHP di server tidak bisa membuka https: buka C:\\xampp\\php\\php.ini, hapus ; di depan extension=openssl (atau extension=curl), lalu restart Apache.'], 500);
     $url = lookup_url();
     if (!$url) json_out(['ok' => false, 'error' => 'Link cek peruntukan di menu Pengaturan tidak valid (harus https dan berisi {id}).'], 400);
     // satu proses sekaligus (dua tab / dua supervisor tidak mengecek ID yang sama)
