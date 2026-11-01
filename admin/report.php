@@ -249,6 +249,7 @@ $uniq = q("SELECT code, COUNT(*) AS n, MIN(scanned_at) AS first_at, MAX(scanned_
 
 // QR unik per group -> peruntukan -> kategori (ASIC, EXH, dan group lain yang punya peruntukan)
 $purp = purpose_matrix($uniq);
+const PURP_PER = 10;   // baris peruntukan per halaman (dibagi di browser, report.js; tanpa JS semua baris tampil)
 
 // ---------- unduh CSV (Excel, pemisah ;) ----------
 if (($_GET['csv'] ?? '') === 'peruntukan') {   // rekap per group peruntukan & kategori
@@ -456,7 +457,7 @@ topbar('report', 'Monitoring Laptop');
           <tbody>
           <?php foreach ($rows as $pu => $cs): $n = array_sum($cs);
               $link = 'report.php?' . http_build_query(array_merge(['from' => $from, 'to' => $to], $dev ? ['device' => $dev] : [], ['grp' => $g, 'peru' => $pu])); ?>
-          <tr<?= $pu === NO_PURPOSE ? ' class="muted"' : '' ?>><td><a href="<?= h($link) ?>" title="Tampilkan QR <?= h($g) ?> dengan peruntukan ini"><?= h($pu) ?></a></td>
+          <tr class="purp-row<?= $pu === NO_PURPOSE ? ' muted' : '' ?>"><td><a href="<?= h($link) ?>" title="Tampilkan QR <?= h($g) ?> dengan peruntukan ini"><?= h($pu) ?></a></td>
             <?php foreach ($cats as $c): ?><td class="right mono"><?= $cs[$c] ?? '<span class="muted">0</span>' ?></td><?php endforeach; ?>
             <?php if (count($cats) > 1): ?><td class="right mono"><b><?= $n ?></b></td><?php endif; ?>
             <td class="rep-bar rep-purp-bar"><i style="width:<?= round($n / max(1, $pmax) * 100, 1) ?>%"></i><small class="muted mono"><?= round($n / max(1, $gt) * 100) ?>%</small></td></tr>
@@ -466,6 +467,7 @@ topbar('report', 'Monitoring Laptop');
             <?php if (count($cats) > 1): ?><td class="right mono"><b><?= $gt ?></b></td><?php endif; ?><td></td></tr>
           </tbody>
         </table></div>
+        <?php if (count($rows) > PURP_PER): ?><div class="rep-pager purp-pager" data-grp="<?= h($g) ?>" data-per="<?= PURP_PER ?>"></div><?php endif; ?>
         <?php endif; ?>
       </div>
       <?php endforeach; ?>
@@ -551,4 +553,4 @@ topbar('report', 'Monitoring Laptop');
   </div>
 </div>
 <?php endif; ?>
-<?php page_foot(['report.js?v=5', 'purpose_fill.js?v=2']);
+<?php page_foot(['report.js?v=6', 'purpose_fill.js?v=2']);

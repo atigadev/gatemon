@@ -88,6 +88,32 @@
     qTimers[sec.id] = setTimeout(() => loadList(sec, {q: v, p: 1}), 350);   // tunggu selesai mengetik
   });
 
+  // ---------- tabel "QR unik per peruntukan": halaman di browser (semua baris sudah ada di HTML) ----------
+  // Halaman tiap group diingat agar tidak kembali ke halaman 1 saat laporan dimuat ulang otomatis.
+  const purpPg = {};
+  function purpPaginate(){
+    document.querySelectorAll('.purp-pager').forEach(pager => {
+      const g = pager.dataset.grp, per = +pager.dataset.per || 10;
+      const rows = [...pager.closest('.rep-purp-g').querySelectorAll('tr.purp-row')];
+      const pages = Math.max(1, Math.ceil(rows.length / per));
+      const p = purpPg[g] = Math.min(Math.max(1, purpPg[g] || 1), pages);
+      rows.forEach((tr, i) => { tr.hidden = i < (p - 1) * per || i >= p * per; });
+      const btn = (pg, label, dis, cur) => '<button type="button" class="pg' + (cur ? ' cur' : '') + '" data-purp-page="' + pg + '"'
+        + (dis || cur ? ' disabled' : '') + (cur ? ' aria-current="page"' : '') + '>' + label + '</button>';
+      const lo = Math.max(1, p - 2), hi = Math.min(pages, p + 2);
+      let nav = btn(1, '«', p === 1) + btn(p - 1, '‹', p === 1) + (lo > 1 ? '<span class="pg-gap">…</span>' : '');
+      for(let i = lo; i <= hi; i++) nav += btn(i, i, false, i === p);
+      nav += (hi < pages ? '<span class="pg-gap">…</span>' : '') + btn(p + 1, '›', p === pages) + btn(pages, '»', p === pages);
+      pager.innerHTML = '<span class="muted small">Menampilkan ' + ((p - 1) * per + 1) + '–' + Math.min(p * per, rows.length)
+        + ' dari ' + rows.length + ' peruntukan</span><nav class="pager" aria-label="Halaman peruntukan">' + nav + '</nav>';
+    });
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.purp-pager button[data-purp-page]');
+    if(b && !b.disabled){ purpPg[b.closest('.purp-pager').dataset.grp] = +b.dataset.purpPage; purpPaginate(); }
+  });
+  purpPaginate();
+
   // ---------- muat ulang otomatis (kehadiran terbaru tanpa reload halaman) ----------
   // Isi <main> diambil ulang dari URL yang sama lalu ditukar; ditunda selama modal terbuka, sedang mengetik di filter,
   // atau tab tidak terlihat. Jeda disimpan per browser; ?auto=30 di URL memaksa jeda (untuk layar TV/monitor).
@@ -125,6 +151,7 @@
       const before = num(om.querySelector('.summary .stat.ok .value'));
       const vals = [...om.querySelectorAll('.stat .value')].map(v => v.textContent);
       om.innerHTML = nm.innerHTML;
+      purpPaginate();
       // tandai angka yang berubah + jumlah QR kehadiran baru
       om.querySelectorAll('.stat .value').forEach((v, i) => { if(vals[i] !== undefined && vals[i] !== v.textContent){ v.classList.remove('bump'); void v.offsetWidth; v.classList.add('bump'); } });
       const added = num(om.querySelector('.summary .stat.ok .value')) - before;
