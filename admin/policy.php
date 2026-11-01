@@ -7,7 +7,7 @@ $pdo = db();
 $err = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     $power = isset(POWER_MODES[$_POST['power'] ?? '']) ? $_POST['power'] : '';
     $wu = isset(WINUPDATE_MODES[$_POST['winupdate'] ?? '']) ? $_POST['winupdate'] : '';
     $st = $pdo->prepare("REPLACE INTO settings (k, v, updated_at) VALUES (?, ?, NOW())");

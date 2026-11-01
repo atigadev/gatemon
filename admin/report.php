@@ -10,7 +10,7 @@ const STATUS_LABEL = ['success' => 'Berhasil', 'belum' => 'Belum waktunya', 'not
 require __DIR__ . '/report_groups.php';   // group kategori (grp_of, grp_sort) dan tgl()
 // simpan pemetaan (modal "Atur group", supervisor). Group kosong = kategori dilepas dari group.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['act'] ?? '') === 'groups' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     $cats_in = (array)($_POST['cat'] ?? []); $grps_in = (array)($_POST['grp'] ?? []);
     $set = $pdo->prepare("REPLACE INTO scan_groups (category, grp, updated_at) VALUES (?, ?, NOW())");
     $del = $pdo->prepare("DELETE FROM scan_groups WHERE category = ?");
@@ -434,7 +434,10 @@ topbar('report', 'Monitoring Laptop');
   <section class="card" id="peruntukan">
     <div class="table-tools">
       <h2><?= icon('tag') ?> QR unik per peruntukan</h2>
-      <a class="btn" href="report.php?<?= h($qs) ?>&amp;csv=peruntukan"><?= icon('download') ?> Unduh CSV peruntukan</a>
+      <div class="rep-head-actions">
+        <?php if (is_supervisor()): ?><button type="button" class="btn" data-open-modal="purp-modal"><?= icon('pulse') ?> Lengkapi peruntukan</button><?php endif; ?>
+        <a class="btn" href="report.php?<?= h($qs) ?>&amp;csv=peruntukan"><?= icon('download') ?> Unduh CSV peruntukan</a>
+      </div>
     </div>
     <div class="rep-purp">
       <?php foreach ($purp as $g => $rows):
@@ -526,5 +529,26 @@ topbar('report', 'Monitoring Laptop');
     <div class="actions grp-actions"><button type="button" class="btn" data-close-modal>Batal</button><button class="btn btn-primary"><?= icon('save') ?> Simpan group</button></div>
   </form>
 </div>
+<div class="modal" id="purp-modal" hidden role="dialog" aria-modal="true" aria-label="Lengkapi peruntukan" data-csrf="<?= csrf_token() ?>">
+  <div class="modal-box form-modal purp-box">
+    <div class="modal-head"><h3><?= icon('pulse') ?> Lengkapi peruntukan</h3><button type="button" class="icon-btn sm" data-close-modal aria-label="Tutup">✕</button></div>
+    <div class="hist-body">
+      <p class="muted small">Scan berhasil yang peruntukannya belum terdeteksi (hari-hari sebelumnya / agent lama) dicek satu per satu ke
+        <code><?= h(setting('purpose_lookup_url')) ?></code> (menu Pengaturan), lalu peruntukannya diisi. Semua tanggal yang masih tersimpan.
+        ID yang sudah dicek tidak diminta lagi.</p>
+      <label class="purp-all"><input type="checkbox" id="purp-all"> Semua kategori <small class="muted">(bawaan: hanya kategori group <?= h(implode(' / ', PURPOSE_GROUPS)) ?>)</small></label>
+      <div class="load purp-stat">
+        <div><span>Belum dicek</span><b id="purp-pending">…</b></div>
+        <div><span>Ditemukan</span><b id="purp-found">–</b></div>
+        <div><span>Tidak terdaftar</span><b id="purp-notfound">–</b></div>
+        <div><span>Gagal (dicoba lagi nanti)</span><b id="purp-error">–</b></div>
+      </div>
+      <div class="purp-prog" hidden><i></i></div>
+      <p class="small" id="purp-msg" aria-live="polite"></p>
+    </div>
+    <div class="actions grp-actions"><button type="button" class="btn" data-close-modal>Tutup</button>
+      <button type="button" class="btn btn-primary" id="purp-run"><?= icon('pulse') ?> Mulai</button></div>
+  </div>
+</div>
 <?php endif; ?>
-<?php page_foot(['report.js?v=5']);
+<?php page_foot(['report.js?v=5', 'purpose_fill.js?v=1']);

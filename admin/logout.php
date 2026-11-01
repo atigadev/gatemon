@@ -2,7 +2,7 @@
 // Keluar: perlu token sesi (logout.php?t=CSRF) agar link/gambar dari situs lain tidak bisa mengeluarkan pengguna.
 require __DIR__ . '/auth.php';
 $t = $_GET['t'] ?? ($_POST['csrf'] ?? '');
-if (current_user() && is_string($t) && hash_equals($_SESSION['csrf'] ?? '', $t)) {
+if (current_user() && is_string($t) && csrf_ok($t)) {
     session_end();
     session_destroy();
     header('Location: login.php?keluar=1');

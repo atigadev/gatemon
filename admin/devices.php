@@ -58,7 +58,7 @@ function cat_select($form, $cur, $ro) {
 }
 $act = $_POST['act'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (is_supervisor() || (is_operator() && in_array($act, ['enroll', 'enroll_cancel'], true)))) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     if ($act === 'add') {
         $key = strtoupper(trim($_POST['device_key']));
         if ($key === '' || !preg_match('/^[A-Z0-9_-]{1,50}$/', $key)) { $msg = 'ID laptop hanya huruf/angka, contoh G003.'; $form_err = $_POST; }

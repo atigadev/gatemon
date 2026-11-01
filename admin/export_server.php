@@ -7,7 +7,7 @@
 require __DIR__ . '/auth.php';
 require_login();
 if (!is_supervisor()) { http_response_code(403); exit('Hanya supervisor.'); }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) { http_response_code(400); exit('Permintaan tidak valid.'); }
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_ok((string)($_POST['csrf'] ?? ''))) { http_response_code(400); exit('Permintaan tidak valid.'); }
 if (!confirm_password((string)($_POST['password'] ?? ''))) { $_SESSION['flash'] = 'Password tidak valid. Paket server tidak dibuat.'; header('Location: settings.php'); exit; }
 @set_time_limit(600);
 @ignore_user_abort(false);

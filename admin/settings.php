@@ -9,7 +9,7 @@ $msg = '';
 $err = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     if (($_POST['act'] ?? '') === 'reset') {
         // hanya pengaturan di halaman ini; penerapan wallpaper (wallpaper_*) diatur di menu Wallpaper
         $in = implode(',', array_fill(0, count($spec), '?'));

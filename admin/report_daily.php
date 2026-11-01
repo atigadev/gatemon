@@ -13,7 +13,7 @@ foreach ($pdo->query("SELECT k, v FROM settings WHERE k IN ('event_from', 'event
 
 // simpan / hapus periode event (supervisor)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) die('csrf');
+    if (!csrf_ok((string)($_POST['csrf'] ?? ''))) die('csrf');
     $who = current_user()['username'];
     if (($_POST['act'] ?? '') === 'save_event' && ($f = $valid($_POST['from'] ?? '')) && ($t = $valid($_POST['to'] ?? ''))) {
         if ($t < $f) [$f, $t] = [$t, $f];

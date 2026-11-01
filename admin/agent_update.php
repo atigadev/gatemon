@@ -34,7 +34,7 @@ foreach ($devs as &$d) {
 unset($d);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     $want = ($_POST['act'] ?? '') === 'all' ? null : array_map('intval', (array)($_POST['ids'] ?? []));
     $pick = array_filter($devs, function ($d) use ($want) { return $d['can'] && ($want === null || in_array((int)$d['id'], $want, true)); });
     if (!$rel['ready']) $err = 'Rilis belum siap: ' . implode(' ', $rel['problems']);

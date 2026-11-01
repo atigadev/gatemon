@@ -6,7 +6,7 @@ $pdo = db();
 $msg = '';
 function post_color() { $c = $_POST['color'] ?? ''; return preg_match('/^#[0-9a-f]{6}$/i', $c) ? strtolower($c) : '#2563eb'; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
-    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) die('csrf');
+    if (!csrf_ok($_POST['csrf'] ?? '')) die('csrf');
     $act = $_POST['act'] ?? '';
     $name = trim($_POST['name'] ?? '');
     if (($act === 'add' || $act === 'edit') && ($name === '' || mb_strlen($name) > 50)) { $msg = 'Nama kategori wajib (maks. 50 karakter).'; }

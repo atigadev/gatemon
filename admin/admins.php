@@ -9,7 +9,7 @@ $msg = '';
 $me = current_user();
 $must = !empty($_SESSION['must_change']);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) die('csrf');
+    if (!csrf_ok((string)($_POST['csrf'] ?? ''))) die('csrf');
     $act = $_POST['act'] ?? '';
     $sup_count = (int)$pdo->query("SELECT COUNT(*) FROM admins WHERE role='supervisor'")->fetchColumn();
     if ($act === 'password') {

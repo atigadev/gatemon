@@ -175,6 +175,9 @@ Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
 - Agent 1.20+ juga menyimpan **peruntukan** (field `peruntukan` di balasan scan, mis. kategori ASIC / EXH; nama field bisa
   diubah di Pengaturan `scan_purpose_key`). Laporan scan & laporan per hari punya rekap per group (ASIC, EXH) ×
   peruntukan × kategori, filter peruntukan, dan CSV peruntukan.
+- Scan lama yang peruntukannya belum terdeteksi: tombol **Lengkapi peruntukan** (Laporan, supervisor) mengecek tiap ID QR ke
+  link cek undangan (Pengaturan `purpose_lookup_url`, bawaan `https://toems.saturegis.com/index.php?id={id}`) bertahap,
+  hasil disimpan di tabel `purpose_lookup` (ID yang sudah dicek tidak diminta lagi; yang gagal dicoba lagi setelah 10 menit).
 - Scan ditampung di agent saat server tidak terjangkau dan dikirim bersama heartbeat; kiriman ulang tidak tercatat dobel.
 - Dashboard: "Scan hari ini" per card + total, riwayat 15 scan di panel detail, peringatan suara bila scan
   "tidak ditemukan" >= ambang per menit. Pengaturan: tangkap scan on/off, lama simpan (bawaan 30 hari), ambang (bawaan 5).

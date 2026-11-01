@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && is_supervisor()) {
     // file melebihi post_max_size: PHP mengosongkan $_POST (termasuk csrf)
     if (!$_POST && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
         $err = 'File terlalu besar (maks. ' . mb_fmt($limit) . ').';
-    } elseif (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) {
+    } elseif (!csrf_ok($_POST['csrf'] ?? '')) {
         die('csrf');
     } else {
         $act = $_POST['act'] ?? '';

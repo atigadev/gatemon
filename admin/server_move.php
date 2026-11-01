@@ -6,7 +6,7 @@ require __DIR__ . '/auth.php';
 require_login();
 const MOVE_MIN = '1.13.0';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !is_supervisor()) { header('Location: settings.php'); exit; }
-if (!hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) die('csrf');
+if (!csrf_ok((string)($_POST['csrf'] ?? ''))) die('csrf');
 $back = function ($msg) { $_SESSION['flash'] = $msg; header('Location: settings.php#pindah-agent'); exit; };
 
 $url = rtrim(trim((string)($_POST['url'] ?? '')), '/');

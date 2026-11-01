@@ -9,7 +9,7 @@ if (current_user()) { header('Location: index.php'); exit; }
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = mb_substr(trim((string)($_POST['username'] ?? '')), 0, 50);
     $pass = (string)($_POST['password'] ?? '');
-    if (!is_string($_POST['csrf'] ?? null) || !hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'])) {
+    if (!is_string($_POST['csrf'] ?? null) || !csrf_ok($_POST['csrf'])) {
         $err = 'Sesi halaman login kedaluwarsa, silakan coba lagi.';
     } elseif (auth_fail_count('login', $ip, null, LOGIN_WINDOW) >= LOGIN_MAX_IP || ($user !== '' && auth_fail_count('login', $ip, strtolower($user), LOGIN_WINDOW) >= LOGIN_MAX_USER)) {
         $err = 'Terlalu banyak percobaan login gagal. Coba lagi dalam ' . LOGIN_WINDOW . ' menit.';

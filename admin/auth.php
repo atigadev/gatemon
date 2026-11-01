@@ -66,9 +66,15 @@ function csrf_token() {
     if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
     return $_SESSION['csrf'];
 }
+// Token CSRF dari form / header cocok dengan sesi. Token kosong selalu ditolak: sesi yang belum pernah membuat token
+// (mis. baru login lalu langsung memanggil API) tidak boleh lolos dengan csrf kosong.
+function csrf_ok($t) {
+    $s = $_SESSION['csrf'] ?? '';
+    return is_string($t) && $t !== '' && is_string($s) && $s !== '' && hash_equals($s, $t);
+}
 function check_csrf() {
     $t = $_POST['csrf'] ?? ($_SERVER['HTTP_X_CSRF'] ?? '');
-    if (!is_string($t) || !hash_equals($_SESSION['csrf'] ?? '', $t)) json_out(['ok' => false, 'error' => 'csrf'], 403);
+    if (!is_string($t) || !csrf_ok($t)) json_out(['ok' => false, 'error' => 'csrf'], 403);
 }
 // Konfirmasi password untuk aksi berbahaya (paket server berisi token, pindah server agent)
 function confirm_password($pass) {
