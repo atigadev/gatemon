@@ -198,6 +198,11 @@ Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
   Pengaturan (mis. saat perawatan laptop).
 - Browser gate memakai profil sendiri `C:\GateMon-Agent\browser-profile`, jadi Chrome/Edge biasa milik petugas tidak
   dianggap "browser gate", dan "Restart browser" hanya menutup jendela gate.
+- **Tampilan browser gate (agent 1.21+)**: *kiosk* (bawaan) = layar penuh tanpa address bar / tombol back & refresh;
+  *browser biasa* = jendela penuh dengan address bar, back, refresh, dan tab (petugas bisa membuka situs lain).
+  Diatur untuk semua laptop di menu Pengaturan ("Browser gate layar penuh (kiosk)") dan bisa ditimpa per laptop di
+  Devices ("Tampilan browser gate"). Bila diubah, browser gate di laptop dibuka ulang otomatis. Di mode kiosk tetap bisa
+  memakai shortcut: Alt+← kembali, F5 / Ctrl+R refresh.
 
 ## Melepas agent dari laptop
 Di laptop, buka folder agent (`C:\GateMon-Agent`) lalu klik dua kali **uninstall_agent.bat** (izin Administrator

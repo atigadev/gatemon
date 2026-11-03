@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.20.0"
+VERSION = "1.21.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -44,6 +44,9 @@ BROWSER = BROWSERS.get(CFG.get("browser", "chrome"), BROWSERS["chrome"])
 gate_url = CFG.get("gate_url", "")  # bisa dikosongkan: server yang memberi tahu
 gate_urls = []    # semua halaman dari server; >1 = dibuka berdampingan kiri-kanan
 mode = "gate"     # "monitor" = hanya pantau koneksi, tanpa browser/halaman gate (diatur di menu Devices)
+# tampilan browser gate: "kiosk" = layar penuh tanpa navigasi, "window" = browser biasa (address bar, back, refresh).
+# Diatur server (menu Pengaturan / Devices); server lama tidak mengirim: pakai "kiosk" di config.json (bawaan true).
+browser_view = "kiosk" if CFG.get("kiosk", True) else "window"
 net_ms = None     # waktu respon heartbeat terakhir ke server
 
 
@@ -67,6 +70,18 @@ def gate_browser_procs():
 # ---------- pengumpulan status ----------
 def browser_running():
     return bool(gate_browser_procs())
+
+
+def running_view():
+    """Tampilan browser gate yang sedang terbuka (mis. dibuka agent versi lama / sebelum agent restart):
+    proses utama browser membawa argumen saat dibuka (--kiosk / --app= = tanpa navigasi)."""
+    for p in gate_browser_procs():
+        try:
+            if any(a == "--kiosk" or a.startswith("--app=") for a in p.cmdline()):
+                return "kiosk"
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return "window"
 
 
 RADMIN_PROC = CFG.get("radmin_process", "rserver3.exe").lower()
@@ -790,11 +805,13 @@ def find_browser_exe():
 
 
 def open_gate(url=None):
-    """Buka halaman gate. 1 URL = layar penuh (kiosk). >1 URL (menu Devices) = jendela berdampingan kiri-kanan.
+    """Buka halaman gate. 1 URL = layar penuh (kiosk) atau browser biasa (browser_view). >1 URL (menu Devices) = jendela berdampingan kiri-kanan.
     url diisi = buka URL itu saja (perintah "Buka halaman gate" dengan URL khusus)."""
     urls = [url] if url else list(gate_urls or ([gate_url] if gate_url else []))
     if not urls:
         raise RuntimeError("URL halaman gate belum diketahui")
+    if not url:
+        _auto["view"] = browser_view                    # perintah Buka halaman gate / Restart browser: tidak dibuka ulang lagi
     if len(urls) > 1:
         return open_multi(urls)
     exe = find_browser_exe()
@@ -804,15 +821,15 @@ def open_gate(url=None):
     if scan_capture:
         # port debug untuk membaca hasil scan; Chrome/Edge hanya membukanya di 127.0.0.1 (tidak bisa diakses dari jaringan)
         args.append(f"--remote-debugging-port={CDP_PORT}")
-    if CFG.get("kiosk", True):
-        args.append("--kiosk")
+    args.append("--kiosk" if browser_view == "kiosk" else "--start-maximized")
     args += ["--new-window", "--disable-session-crashed-bubble", "--no-first-run", "--no-default-browser-check", urls[0]]
     subprocess.Popen(args, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     return "browser dibuka: " + urls[0]
 
 
 # ---------- beberapa halaman berdampingan kiri-kanan ----------
-# Tiap URL dibuka sebagai jendela aplikasi (tanpa address bar), lalu disusun lewat DevTools Protocol
+# Tiap URL dibuka sebagai jendela aplikasi (tanpa address bar; browser biasa: jendela dengan address bar & tombol navigasi),
+# lalu disusun lewat DevTools Protocol
 # (port lokal 127.0.0.1, sama dengan pemantau scan) agar lebarnya sama dan tidak menutupi taskbar.
 def work_area():
     """Area layar tanpa taskbar (x, y, lebar, tinggi) dalam satuan yang sama dengan Chrome (DIP)."""
@@ -895,7 +912,7 @@ def open_multi(urls, only=None):
             "--no-default-browser-check", "--disable-session-crashed-bubble"]
     for i, u in enumerate(urls):
         if only is None or i in only:
-            subprocess.Popen(base + ["--app=" + u], creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+            subprocess.Popen(base + (["--app=" + u] if browser_view == "kiosk" else ["--new-window", u]), creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
             time.sleep(1.5)                              # beri waktu browser start sebelum jendela berikutnya
     threading.Thread(target=lambda: _safe(layout_windows, urls), daemon=True).start()
     return "%d halaman dibuka berdampingan: %s" % (len(urls) if only is None else len(only), " | ".join(urls))
@@ -921,7 +938,7 @@ def kill_browser():
 
 
 # ---------- buka halaman gate otomatis ----------
-_auto = {"opened": False, "last_open": 0.0, "closed_since": None, "urls": None, "missing_since": None}
+_auto = {"opened": False, "last_open": 0.0, "closed_since": None, "urls": None, "view": None, "missing_since": None}
 
 
 def multi_watch(j):
@@ -954,12 +971,13 @@ def auto_gate(j):
     if browser_running():
         _auto["opened"], _auto["closed_since"] = True, None
         if _auto["urls"] is None:
-            _auto["urls"] = list(gate_urls)
-        elif _auto["urls"] != gate_urls and time.time() - _auto["last_open"] >= 20:
-            log.info("daftar halaman berubah di menu Devices, browser gate dibuka ulang")
+            _auto["urls"], _auto["view"] = list(gate_urls), running_view()
+        if (_auto["urls"] != gate_urls or _auto["view"] != browser_view) and time.time() - _auto["last_open"] >= 20:
+            log.info("%s, browser gate dibuka ulang", "daftar halaman berubah di menu Devices" if _auto["urls"] != gate_urls
+                     else "tampilan browser diubah ke " + ("kiosk" if browser_view == "kiosk" else "browser biasa"))
             kill_browser()
             _safe(open_gate)
-            _auto["urls"], _auto["last_open"] = list(gate_urls), time.time()
+            _auto["urls"], _auto["view"], _auto["last_open"] = list(gate_urls), browser_view, time.time()
         elif len(gate_urls) > 1:
             multi_watch(j)
         return
@@ -972,7 +990,7 @@ def auto_gate(j):
         log.info("membuka halaman gate otomatis (%s)", "terhubung ke server" if first else "browser gate tertutup")
         try:
             open_gate()
-            _auto["urls"] = list(gate_urls)
+            _auto["urls"], _auto["view"] = list(gate_urls), browser_view
         except Exception as e:
             log.error("gagal membuka halaman gate: %s", e)
         _auto["opened"], _auto["last_open"] = True, now
@@ -2497,7 +2515,7 @@ def server_move_failed():
 
 # ---------- loop utama ----------
 def main():
-    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture
+    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture, browser_view
     interval = int(CFG.get("interval", 5))
     log.info("agent %s start, server %s, device %s", VERSION, SERVER, CFG["device_key"])
     psutil.cpu_percent(interval=None)
@@ -2545,6 +2563,8 @@ def main():
                     gate_urls = [str(u) for u in j["gate_urls"] if str(u).startswith(("http://", "https://"))][:4]
                 if j.get("gate_url"):
                     gate_url = j["gate_url"]
+                if j.get("browser_view") in ("kiosk", "window"):
+                    browser_view = j["browser_view"]
                 if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
                     support_sync(j["support"])
                 if isinstance(j.get("live"), dict):             # layar live (server lama tidak mengirim)

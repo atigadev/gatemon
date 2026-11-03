@@ -175,6 +175,8 @@ function settings_spec() {
             'help' => 'Bila jendela gate tertutup (tidak sengaja atau crash), agent membukanya lagi setelah jeda di bawah. Matikan saat perawatan laptop.'],
         'reopen_after' => ['label' => 'Jeda sebelum dibuka ulang', 'unit' => 'detik', 'min' => 5, 'max' => 600, 'def' => 15,
             'help' => 'Berapa lama browser gate boleh tertutup sebelum agent membukanya lagi.'],
+        'gate_kiosk' => ['label' => 'Browser gate layar penuh (kiosk)', 'type' => 'bool', 'min' => 0, 'max' => 1, 'def' => 1,
+            'help' => 'Aktif = kiosk: layar penuh tanpa address bar / tombol back & refresh (paling aman, petugas tidak bisa membuka situs lain). Mati = browser biasa (jendela penuh dengan address bar, back, refresh, tab). Bisa diatur per laptop di menu Devices. Berubah = browser gate dibuka ulang. Agent 1.21+.'],
         // hemat internet & beban server halaman gate (agent >= 1.5)
         'gate_check_interval' => ['label' => 'Cek halaman gate setiap', 'unit' => 'detik', 'min' => 10, 'max' => 600, 'def' => 30,
             'help' => 'Agent mengecek apakah halaman gate (internet) bisa diakses. Cek ringan (HEAD, hanya status), tidak tiap heartbeat, agar tidak membebani internet venue dan server halaman gate.'],
@@ -371,6 +373,14 @@ const SUPPORT_MODES = ['' => 'Ikut menu Pengaturan', '1' => 'Selalu tampil', '0'
 // Tombol tampil di laptop ini? Pilihan per laptop (menu Support) mengalahkan menu Pengaturan
 function support_on($d) {
     return isset($d['support_overlay']) && $d['support_overlay'] !== null ? (bool)$d['support_overlay'] : (bool)setting('support_overlay');
+}
+// Tampilan browser gate (agent >= 1.21): kiosk = layar penuh tanpa navigasi, window = browser biasa.
+// Pilihan per laptop (menu Devices) mengalahkan menu Pengaturan.
+const BROWSER_VIEWS = ['' => 'Ikut menu Pengaturan', 'kiosk' => 'Kiosk (layar penuh)', 'window' => 'Browser biasa'];
+const BROWSER_VIEW_MIN = '1.21.0';
+function browser_view_of($d) {
+    $v = (string)($d['browser_view'] ?? '');
+    return $v === 'kiosk' || $v === 'window' ? $v : (setting('gate_kiosk') ? 'kiosk' : 'window');
 }
 // Isi pesan: UTF-8 valid, tanpa karakter kontrol (kecuali baris baru), maks 1000 karakter
 function support_text($s) {
