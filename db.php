@@ -216,7 +216,7 @@ function settings_spec() {
             'help' => 'Request di halaman scan yang dibaca hasilnya (balasan JSON berisi status). Pisahkan dengan koma.'],
         'scan_purpose_key' => ['label' => 'Field peruntukan', 'type' => 'text', 'def' => 'peruntukan',
             'help' => 'Nama field di balasan scan yang berisi peruntukan (mis. untuk kategori ASIC / EXH), untuk laporan per peruntukan. Pisahkan dengan koma bila namanya bisa berbeda. Agent 1.20+.'],
-        'purpose_lookup_url' => ['label' => 'Link cek peruntukan', 'type' => 'text', 'def' => 'https://toems.saturegis.com/index.php?id={id}',
+        'purpose_lookup_url' => ['label' => 'Link cek peruntukan', 'type' => 'text', 'url' => true, 'def' => 'https://toems.saturegis.com/index.php?id={id}',
             'help' => 'Halaman cek undangan per ID QR ({id} diganti ID QR). Dipakai tombol "Lengkapi peruntukan" di menu Laporan untuk scan yang peruntukannya belum terdeteksi. Harus https.'],
         'scan_keep_days' => ['label' => 'Simpan data scan selama', 'unit' => 'hari', 'min' => 1, 'max' => 365, 'def' => 30,
             'help' => 'Data scan yang lebih lama dihapus otomatis.'],

@@ -65,6 +65,14 @@ Menu **Kategori** (supervisor) untuk mengatur lokasi laptop: Gate, Tiket Box, Co
 Dashboard menampilkan tab per kategori (jumlah laptop + jumlah yang bermasalah), card diberi pita warna kategorinya,
 dan tombol "Kirim ke semua" hanya berlaku untuk laptop di tab yang sedang dibuka.
 
+## Export / import laptop (CSV)
+Menu **Devices › Export / import CSV** (supervisor). **Export** mengunduh semua laptop ke CSV (dibuka di Excel) dalam
+format yang sama dengan import; **Template kosong** hanya berisi judul kolom. Isi satu baris per laptop
+(`id_laptop`, `nama` wajib; kategori & wallpaper ditulis dengan namanya), simpan sebagai CSV UTF-8, lalu unggah.
+File diperiksa dulu dan tiap baris ditampilkan (baru / diperbarui / dilewati / error) sebelum disimpan.
+Laptop baru mendapat token baru (lalu buat Kode instalasi); laptop yang ID-nya sudah ada dilewati, atau diperbarui
+bila dicentang. Kolom yang tidak ada di file tidak diubah. Token tidak pernah ikut diekspor maupun diubah.
+
 ## Pengaturan waktu
 Menu **Pengaturan** (supervisor): interval heartbeat agent, batas dianggap offline (min. 3x heartbeat),
 refresh dashboard/monitor, dan masa berlaku kode instalasi. Langsung berlaku: agent mengikuti interval baru pada

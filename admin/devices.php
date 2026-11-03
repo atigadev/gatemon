@@ -149,7 +149,7 @@ topbar('devices', 'Monitoring Laptop');
 <main class="page">
   <div class="page-head">
     <div><h1>Devices</h1><p class="muted">Daftar laptop yang dipantau, token agent, dan paket instalasi agent.</p></div>
-    <?php if ($sup): ?><button class="btn btn-primary" type="button" data-dev-add><?= icon('plus') ?> Tambah laptop</button><?php endif; ?>
+    <?php if ($sup): ?><div class="head-btns"><a class="btn" href="devices_csv.php" title="Export daftar laptop ke CSV / tambah banyak laptop sekaligus dari Excel"><?= icon('download') ?> Export / import CSV</a><button class="btn btn-primary" type="button" data-dev-add><?= icon('plus') ?> Tambah laptop</button></div><?php endif; ?>
   </div>
 <?= flash($form_err === null ? $msg : '') ?>
 
