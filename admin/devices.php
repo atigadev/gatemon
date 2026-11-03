@@ -247,6 +247,12 @@ topbar('devices', 'Monitoring Laptop');
     <div class="modal-head"><h3 id="dev-title">Tambah laptop</h3><button type="button" class="icon-btn sm" data-close aria-label="Tutup">✕</button></div>
     <?php if ($form_err !== null): ?><p class="notice error"><?= h($msg) ?></p><?php endif; ?>
     <input type="hidden" name="csrf" value="<?= $csrf ?>">
+    <div class="bulk-tip" id="f-bulk">
+      <?= icon('devices') ?>
+      <div><b>Banyak laptop sekaligus?</b><span class="muted">Isi di Excel lalu import, tidak perlu satu per satu.</span></div>
+      <a class="btn sm" href="devices_csv.php?template=1"><?= icon('download') ?> Template</a>
+      <a class="btn sm btn-primary" href="devices_csv.php"><?= icon('plus') ?> Import CSV</a>
+    </div>
     <input type="hidden" name="act" value="add" id="f-act">
     <input type="hidden" name="id" value="" id="f-id">
     <div class="form-grid">
@@ -323,4 +329,4 @@ if ($show && $op):
   </div>
 </div>
 <?php endif; ?>
-<?php page_foot(['devices.js?v=8']);
+<?php page_foot(['devices.js?v=9']);

@@ -876,4 +876,11 @@ body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translate
 .imp-table tr.imp-skip td{opacity:.6}
 .imp-err{color:var(--bad);font-weight:600}
 .imp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-@media (max-width:860px){ .imp-grid{grid-template-columns:1fr} }
+@media (max-width:860px){ .imp-grid{grid-template-columns:1fr} }.bulk-tip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;margin:0 0 14px;border-radius:10px;
+  border:1px dashed color-mix(in srgb,var(--primary) 45%,transparent);background:color-mix(in srgb,var(--primary) 7%,transparent)}
+.bulk-tip[hidden]{display:none}
+.bulk-tip > .ic{color:var(--primary)}
+.bulk-tip > div{flex:1;min-width:180px;display:flex;flex-direction:column;font-size:13px;line-height:1.4}
+.bulk-tip > div span{font-size:12.5px}.bulk-tip .btn{padding:6px 11px;font-size:12.5px}
+.form-modal > .bulk-tip{margin:16px 22px 0}
+@media (max-width:520px){ .form-modal > .bulk-tip{margin:14px 16px 0} .bulk-tip > div{flex-basis:100%} .bulk-tip > .ic{display:none} }

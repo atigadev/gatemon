@@ -17,6 +17,7 @@
     $('dev-title').textContent = edit ? 'Edit laptop ' + d.device_key : 'Tambah laptop';
     $('dev-submit').querySelector('span').textContent = edit ? 'Simpan' : 'Tambah';
     $('f-act').value = edit ? 'edit' : 'add';
+    $('f-bulk').hidden = edit;   // import CSV hanya untuk tambah laptop baru
     $('f-id').value = edit ? d.id : '';
     const key = $('f-key');
     key.readOnly = edit; key.required = !edit;
