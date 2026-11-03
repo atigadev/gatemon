@@ -47,6 +47,29 @@ function json_out($data, $code = 200) {
     exit;
 }
 
+// CA bundle untuk https keluar (cek peruntukan, push notification): php.ini tanpa openssl.cafile / curl.cainfo
+// memakai CA bundle bawaan XAMPP bila ada
+function ca_bundle() {
+    foreach ([ini_get('openssl.cafile'), ini_get('curl.cainfo'), dirname(PHP_BINARY) . '/../apache/bin/curl-ca-bundle.crt',
+              'C:/xampp/apache/bin/curl-ca-bundle.crt', '/etc/ssl/certs/ca-certificates.crt'] as $f) {
+        if ($f && is_file($f)) return $f;
+    }
+    return null;
+}
+
+// Balas JSON sekarang lalu lanjutkan proses (mis. kirim push) tanpa membuat agent menunggu
+function json_out_early($data) {
+    ignore_user_abort(true);
+    $out = json_encode($data, JSON_UNESCAPED_UNICODE);
+    http_response_code(200);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Length: ' . strlen($out));
+    header('Connection: close');
+    echo $out;
+    while (ob_get_level() > 0) ob_end_flush();
+    flush();
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+}
 function json_in() {
     $raw = file_get_contents('php://input');
     $d = json_decode($raw, true);

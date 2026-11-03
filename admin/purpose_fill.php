@@ -61,14 +61,6 @@ function lookup_url() {
 // Pakai ekstensi curl bila aktif; bila tidak, stream https bawaan PHP (ekstensi openssl).
 const FETCH_MAX = 1048576;   // halaman normal ~8 KB
 function can_fetch() { return function_exists('curl_init') || in_array('https', stream_get_wrappers(), true); }
-function ca_bundle() {
-    // php.ini tanpa openssl.cafile / curl.cainfo: pakai CA bundle bawaan XAMPP bila ada
-    foreach ([ini_get('openssl.cafile'), ini_get('curl.cainfo'), dirname(PHP_BINARY) . '/../apache/bin/curl-ca-bundle.crt',
-              'C:/xampp/apache/bin/curl-ca-bundle.crt', '/etc/ssl/certs/ca-certificates.crt'] as $f) {
-        if ($f && is_file($f)) return $f;
-    }
-    return null;
-}
 function http_fetch($url) {
     $ca = ca_bundle();
     if (function_exists('curl_init')) {

@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 14;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21)
+const SCHEMA_VERSION = 15;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA)
 
 function schema_version(PDO $pdo) {
     try {
@@ -268,6 +268,25 @@ function schema_apply(PDO $pdo) {
         $done[] = 'permintaan shutdown dari laptop ditambahkan';
     }
     $add('support_msgs', $sm, 'decision', "ADD decision ENUM('approved','rejected','cancelled') NULL AFTER ack_by");
+
+    // Push notification ke HP/PC (PWA, Web Push): satu baris per browser yang mengaktifkan notifikasi (menu Notifikasi).
+    // ep_hash = sha256(endpoint) untuk UNIQUE (endpoint terlalu panjang untuk index). Kunci VAPID server di tabel settings.
+    $table('push_subs', "
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admin_id INT NOT NULL,
+  ep_hash CHAR(64) NOT NULL,
+  endpoint VARCHAR(600) NOT NULL,
+  p256dh VARCHAR(120) NOT NULL,
+  auth VARCHAR(40) NOT NULL,
+  want_emg TINYINT NOT NULL DEFAULT 1,
+  want_chat TINYINT NOT NULL DEFAULT 1,
+  ua VARCHAR(150) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  last_ok DATETIME NULL,
+  last_err VARCHAR(200) NULL,
+  fails INT NOT NULL DEFAULT 0,
+  UNIQUE KEY ep_hash (ep_hash),
+  INDEX admin_id (admin_id)");
 
     // Kategori bawaan hanya untuk database baru (kategori yang sengaja dihapus tidak muncul lagi)
     if ($fresh) {

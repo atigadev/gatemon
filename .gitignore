@@ -16,3 +16,6 @@ config.local.php
 # gambar layar live sementara
 live/*
 !live/.htaccess
+# sertifikat CA publik (dibuat admin-tools/sertifikat-https.bat di server)
+sertifikat/*
+!sertifikat/.htaccess

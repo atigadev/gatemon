@@ -1,0 +1,7 @@
+# Hanya sertifikat CA publik (gatemon-ca.crt, dibuat admin-tools/sertifikat-https.bat) yang boleh diunduh dari sini
+Options -Indexes
+AddType application/x-x509-ca-cert .crt
+Require all denied
+<FilesMatch "^gatemon-ca\.crt$">
+    Require all granted
+</FilesMatch>

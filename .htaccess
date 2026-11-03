@@ -8,7 +8,7 @@ DirectoryIndex index.php
 RedirectMatch 404 /\.git(/|$)
 
 # File konfigurasi/library: hanya di-include PHP, tidak boleh dibuka langsung
-<FilesMatch "^(config|config\.local|config\.local\.example|db|schema|security)\.php$">
+<FilesMatch "^(config|config\.local|config\.local\.example|db|schema|security|push)\.php$">
     Require all denied
 </FilesMatch>
 
@@ -16,6 +16,9 @@ RedirectMatch 404 /\.git(/|$)
 <FilesMatch "\.(md|json|py|bat|reg|txt|log|ini|sql|bak|zip)$|^\.">
     Require all denied
 </FilesMatch>
+
+# manifest aplikasi PWA (admin/manifest.webmanifest)
+AddType application/manifest+json .webmanifest
 
 # setup.php memeriksa sendiri: hanya dari localhost, atau dengan setup_key di config.local.php
 

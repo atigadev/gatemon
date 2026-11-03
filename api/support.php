@@ -69,4 +69,12 @@ if ($kind === 'emergency') {
 } elseif ($kind === 'shutdown') {
     log_event($d['id'], 'warn', "{$d['name']}: minta izin shutdown" . ($author !== '' ? " (user $author)" : '') . ", menunggu persetujuan petugas");
 }
+if ($kind === 'emergency' || $kind === 'chat') {
+    // push notification ke HP/PC admin (PWA): agent dibalas dulu, pengiriman push tidak membuatnya menunggu
+    json_out_early(['ok' => true, 'id' => $id]);
+    require __DIR__ . '/../push.php';
+    set_time_limit(60);
+    try { push_notify($kind, $d, $text, $id); } catch (Exception $e) { error_log('GateMon push: ' . $e->getMessage()); }
+    exit;
+}
 json_out(['ok' => true, 'id' => $id]);

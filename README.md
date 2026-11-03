@@ -114,6 +114,27 @@ Agar alarm berbunyi di PC server, biarkan halaman Dashboard atau Monitor terbuka
 (browser baru mengizinkan suara setelah ada klik). Tombol di laptop bisa dimatikan di **Pengaturan → Chat support & darurat**.
 Pesan disimpan 90 hari.
 
+## Aplikasi (PWA) & push notification
+GateMon bisa dipasang sebagai aplikasi di HP / PC, dan **DARURAT** serta **chat** dari laptop langsung masuk sebagai
+push notification, juga saat aplikasi / browser ditutup. Buka ikon 🔔 di topbar (halaman **Notifikasi**), lalu
+**Aktifkan notifikasi** di setiap HP / PC. Pilih jenis per browser: DARURAT (semua akun) dan chat (petugas & supervisor).
+Tombol **Kirim notifikasi uji** langsung memberi tahu bila pengiriman gagal.
+- **Suara**: saat aplikasi tertutup, notifikasi memakai suara notifikasi & getar HP (browser tidak mengizinkan suara sendiri);
+  DARURAT tetap di layar sampai disentuh. Saat aplikasi terbuka, alarm GateMon langsung berbunyi (sirene + kalimat dibacakan).
+- **Butuh HTTPS** (aturan browser) dan **internet** di server & HP (push lewat layanan Google / Apple / Mozilla / Microsoft;
+  isinya dienkripsi end-to-end, kunci VAPID dibuat otomatis di tabel settings). Agent tetap memakai `http://`.
+- iPhone / iPad: iOS 16.4+, pasang dulu dari Safari (Bagikan → Tambah ke Layar Utama), aktifkan notifikasi dari aplikasi itu.
+
+**HTTPS di jaringan lokal** (sekali, di PC server):
+1. Jalankan `admin-tools\sertifikat-https.bat C:\GateMon-kunci 10.5.5.100 gatemon.lan` (IP & nama komputer terdeteksi otomatis,
+   tambahkan IP / nama lain bila perlu). Dibuat **CA GateMon** + sertifikat server, dipasang ke Apache XAMPP
+   (`conf\ssl.crt\server.crt`, `conf\ssl.key\server.key`, file lama dicadangkan). Restart Apache.
+2. Buka `https://10.5.5.100/gatemon/admin/notifikasi.php` dari tiap HP / PC, unduh **sertifikat CA GateMon** dan pasang
+   (langkah Android / iPhone / Windows ada di halaman itu).
+- `gatemon-ca.key` di folder kunci adalah kunci RAHASIA CA: jangan disimpan di htdocs / git (skrip menolaknya), simpan cadangannya.
+  Menjalankan ulang skrip (mis. menambah IP) memakai CA yang sama, jadi HP tidak perlu memasang CA lagi.
+- Ekstensi PHP **openssl** wajib aktif (biasanya sudah); curl tidak wajib.
+
 ## Layar live (agent 1.14+)
 Supervisor bisa melihat layar laptop secara langsung tanpa Radmin/aplikasi lain: Dashboard → klik laptop → **Layar live**
 (atau klik kanan card). Laptop mengirim gambar layar (JPEG, 1–2 per detik, hanya bila layar berubah) ke server, jadi tetap

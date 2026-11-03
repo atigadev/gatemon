@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "GateMon - Monitoring Laptop",
+  "short_name": "GateMon",
+  "description": "Monitoring dan kontrol laptop gate, chat support, dan alarm DARURAT.",
+  "lang": "id",
+  "start_url": "./index.php?src=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070d1a",
+  "theme_color": "#070d1a",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Support", "url": "./support.php", "icons": [{"src": "icons/icon-192.png", "sizes": "192x192"}]},
+    {"name": "Monitor", "url": "./monitor.php", "icons": [{"src": "icons/icon-192.png", "sizes": "192x192"}]}
+  ]
+}

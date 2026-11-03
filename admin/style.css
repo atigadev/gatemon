@@ -269,6 +269,12 @@ body.wall{height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction
 }
 @media (max-width:520px){
   .brand small{display:none}
+  /* topbar HP tetap 1 baris: tombol pasang aplikasi ada juga di halaman Notifikasi */
+  .top-right{gap:6px}.top-right [data-pwa-install]{display:none !important}
+  .topbar-in{gap:8px}
+}
+@media (max-width:420px){
+  .brand-txt{display:none}
   .grid{grid-template-columns:1fr}
   .row-form{grid-template-columns:1fr}
   .card{padding:16px}
@@ -751,3 +757,21 @@ body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translate
 .purp-prog{height:8px;border-radius:999px;background:var(--surface-3);overflow:hidden;margin:12px 0 4px}
 .purp-prog i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--primary),var(--primary-2));transition:width .3s}
 #purp-msg.bad{color:var(--bad)}#purp-msg.ok{color:var(--ok)}
+/* Aplikasi & notifikasi (PWA, push) */
+.nt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:16px;align-items:start}
+.nt-grid .card{margin-bottom:0}
+.nt-rows{display:grid;gap:8px;margin:4px 0 14px}
+.nt-rows>div{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2)}
+.nt-rows span{color:var(--text-2);font-size:13px;flex:none}
+.nt-state{font-size:13px;text-align:right}.nt-state.ok{color:var(--ok)}.nt-state.bad{color:var(--bad)}.nt-state.warn{color:var(--warn)}
+.nt-kinds{border:0;padding:0;margin:0 0 12px;display:grid;gap:8px}
+.nt-check{display:flex;gap:10px;align-items:flex-start;cursor:pointer}.nt-check input{margin-top:3px;flex:none}
+.nt-check span{display:flex;flex-direction:column;gap:2px}
+.nt-actions{justify-content:flex-start;flex-wrap:wrap}
+.nt-msg{min-height:1.4em;margin:10px 0 0}.nt-msg.ok{color:var(--ok)}.nt-msg.bad{color:var(--bad)}
+.nt-sub{font-size:14px;margin:16px 0 8px}
+.nt-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.nt-list li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.nt-list li div{display:flex;flex-direction:column;gap:2px;min-width:0}.nt-list small{overflow-wrap:anywhere}
+.nt-steps{margin:8px 0 0;padding-left:18px;display:grid;gap:8px;color:var(--text-2)}
+.icon-btn.active{color:var(--primary);border-color:var(--primary)}
