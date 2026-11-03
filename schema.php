@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 15;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA)
+const SCHEMA_VERSION = 16;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA); 16 = cetak langsung tanpa dialog per laptop (agent 1.22)
 
 function schema_version(PDO $pdo) {
     try {
@@ -134,6 +134,8 @@ function schema_apply(PDO $pdo) {
     $add('devices', $d, 'support_overlay', "ADD support_overlay TINYINT NULL, ADD support_state VARCHAR(220) NULL");
     // tampilan browser gate per laptop (agent >= 1.21): NULL = ikut menu Pengaturan, 'kiosk' = layar penuh, 'window' = browser biasa
     $add('devices', $d, 'browser_view', "ADD browser_view VARCHAR(10) NULL AFTER mode");
+    // cetak langsung ke printer default tanpa dialog (agent >= 1.22): NULL = ikut menu Pengaturan, 1 = ya, 0 = tidak
+    $add('devices', $d, 'silent_print', "ADD silent_print TINYINT NULL AFTER browser_view");
     // layar live (agent >= 1.14): sesi aktif selama live_until di masa depan (diperpanjang halaman penonton);
     // gambar terakhir disimpan sebagai file live/ID.jpg (ditimpa terus, dihapus saat sesi selesai)
     $add('devices', $d, 'live_until', "ADD live_until DATETIME NULL, ADD live_started DATETIME NULL, ADD live_by VARCHAR(50) NULL, ADD live_mode VARCHAR(10) NULL, ADD live_seq INT NOT NULL DEFAULT 0, ADD live_at DATETIME NULL, ADD live_err VARCHAR(200) NULL, ADD live_w INT NULL, ADD live_h INT NULL");

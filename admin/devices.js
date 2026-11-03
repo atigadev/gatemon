@@ -7,7 +7,7 @@
   function syncMode(){
     if(!modal) return;
     const m = modal.querySelector('input[name=mode]:checked');
-    $('f-url-row').hidden = $('f-view-row').hidden = m && m.value === 'monitor'; // URL & tampilan browser gate tidak dipakai di mode monitor
+    $('f-url-row').hidden = $('f-view-row').hidden = $('f-print-row').hidden = m && m.value === 'monitor'; // URL & tampilan browser gate tidak dipakai di mode monitor
     const c = modal.querySelector('input[name=cam_mode]:checked'), cm = c ? c.value : 'none';
     $('f-cam-row').hidden = cm !== 'custom';
     $('f-cam-auto').hidden = cm !== 'auto';
@@ -30,6 +30,7 @@
       if(wp) wp.value = d.wallpaper_id || '';
       modal.querySelectorAll('input[name=mode]').forEach(r => r.checked = r.value === d.mode);
       $('f-view').value = d.browser_view || '';
+      $('f-print').value = d.silent_print ?? '';
       modal.querySelectorAll('.notice.error').forEach(n => n.remove());
     }
     syncMode();

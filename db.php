@@ -200,6 +200,8 @@ function settings_spec() {
             'help' => 'Berapa lama browser gate boleh tertutup sebelum agent membukanya lagi.'],
         'gate_kiosk' => ['label' => 'Browser gate layar penuh (kiosk)', 'type' => 'bool', 'min' => 0, 'max' => 1, 'def' => 1,
             'help' => 'Aktif = kiosk: layar penuh tanpa address bar / tombol back & refresh (paling aman, petugas tidak bisa membuka situs lain). Mati = browser biasa (jendela penuh dengan address bar, back, refresh, tab). Bisa diatur per laptop di menu Devices. Berubah = browser gate dibuka ulang. Agent 1.21+.'],
+        'gate_silent_print' => ['label' => 'Cetak langsung tanpa dialog print', 'type' => 'bool', 'min' => 0, 'max' => 1, 'def' => 0,
+            'help' => 'Print dari halaman gate langsung keluar di printer default Windows laptop itu, tanpa jendela pilihan printer (opsi --kiosk-printing Chrome / Edge). Atur printer default di Windows laptop. Bisa diatur per laptop di menu Devices. Berubah = browser gate dibuka ulang. Agent 1.22+.'],
         // hemat internet & beban server halaman gate (agent >= 1.5)
         'gate_check_interval' => ['label' => 'Cek halaman gate setiap', 'unit' => 'detik', 'min' => 10, 'max' => 600, 'def' => 30,
             'help' => 'Agent mengecek apakah halaman gate (internet) bisa diakses. Cek ringan (HEAD, hanya status), tidak tiap heartbeat, agar tidak membebani internet venue dan server halaman gate.'],
@@ -401,6 +403,11 @@ function support_on($d) {
 // Pilihan per laptop (menu Devices) mengalahkan menu Pengaturan.
 const BROWSER_VIEWS = ['' => 'Ikut menu Pengaturan', 'kiosk' => 'Kiosk (layar penuh)', 'window' => 'Browser biasa'];
 const BROWSER_VIEW_MIN = '1.21.0';
+const SILENT_PRINTS = ['' => 'Ikut menu Pengaturan', '1' => 'Langsung ke printer default (tanpa dialog)', '0' => 'Tampilkan dialog print'];
+const SILENT_PRINT_MIN = '1.22.0';
+function silent_print_of($d) {
+    return isset($d['silent_print']) && $d['silent_print'] !== null ? (bool)$d['silent_print'] : (bool)setting('gate_silent_print');
+}
 function browser_view_of($d) {
     $v = (string)($d['browser_view'] ?? '');
     return $v === 'kiosk' || $v === 'window' ? $v : (setting('gate_kiosk') ? 'kiosk' : 'window');

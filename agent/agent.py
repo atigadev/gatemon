@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.21.0"
+VERSION = "1.22.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -47,6 +47,17 @@ mode = "gate"     # "monitor" = hanya pantau koneksi, tanpa browser/halaman gate
 # tampilan browser gate: "kiosk" = layar penuh tanpa navigasi, "window" = browser biasa (address bar, back, refresh).
 # Diatur server (menu Pengaturan / Devices); server lama tidak mengirim: pakai "kiosk" di config.json (bawaan true).
 browser_view = "kiosk" if CFG.get("kiosk", True) else "window"
+# cetak langsung ke printer default Windows tanpa dialog print (--kiosk-printing), diatur server (agent >= 1.22)
+silent_print = bool(CFG.get("silent_print", False))
+
+
+def view_key():
+    """Cara browser gate dibuka; berubah = browser dibuka ulang (argumen hanya berlaku saat browser start)."""
+    return browser_view + ("+print" if silent_print else "")
+
+
+def browser_flags():
+    return ["--kiosk-printing"] if silent_print else []
 net_ms = None     # waktu respon heartbeat terakhir ke server
 
 
@@ -73,15 +84,17 @@ def browser_running():
 
 
 def running_view():
-    """Tampilan browser gate yang sedang terbuka (mis. dibuka agent versi lama / sebelum agent restart):
-    proses utama browser membawa argumen saat dibuka (--kiosk / --app= = tanpa navigasi)."""
+    """Cara browser gate yang sedang terbuka dibuka (mis. oleh agent versi lama / sebelum agent restart), format view_key():
+    proses utama browser membawa argumen saat dibuka (--kiosk / --app= = tanpa navigasi, --kiosk-printing = cetak langsung)."""
+    kiosk = prn = False
     for p in gate_browser_procs():
         try:
-            if any(a == "--kiosk" or a.startswith("--app=") for a in p.cmdline()):
-                return "kiosk"
+            args = p.cmdline()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-    return "window"
+            continue
+        kiosk = kiosk or any(a == "--kiosk" or a.startswith("--app=") for a in args)
+        prn = prn or "--kiosk-printing" in args
+    return ("kiosk" if kiosk else "window") + ("+print" if prn else "")
 
 
 RADMIN_PROC = CFG.get("radmin_process", "rserver3.exe").lower()
@@ -811,7 +824,7 @@ def open_gate(url=None):
     if not urls:
         raise RuntimeError("URL halaman gate belum diketahui")
     if not url:
-        _auto["view"] = browser_view                    # perintah Buka halaman gate / Restart browser: tidak dibuka ulang lagi
+        _auto["view"] = view_key()                      # perintah Buka halaman gate / Restart browser: tidak dibuka ulang lagi
     if len(urls) > 1:
         return open_multi(urls)
     exe = find_browser_exe()
@@ -822,6 +835,7 @@ def open_gate(url=None):
         # port debug untuk membaca hasil scan; Chrome/Edge hanya membukanya di 127.0.0.1 (tidak bisa diakses dari jaringan)
         args.append(f"--remote-debugging-port={CDP_PORT}")
     args.append("--kiosk" if browser_view == "kiosk" else "--start-maximized")
+    args += browser_flags()
     args += ["--new-window", "--disable-session-crashed-bubble", "--no-first-run", "--no-default-browser-check", urls[0]]
     subprocess.Popen(args, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     return "browser dibuka: " + urls[0]
@@ -909,7 +923,7 @@ def open_multi(urls, only=None):
     if not exe:
         raise RuntimeError("browser tidak ditemukan")
     base = [exe, "--user-data-dir=" + PROFILE, f"--remote-debugging-port={CDP_PORT}", "--no-first-run",
-            "--no-default-browser-check", "--disable-session-crashed-bubble"]
+            "--no-default-browser-check", "--disable-session-crashed-bubble"] + browser_flags()
     for i, u in enumerate(urls):
         if only is None or i in only:
             subprocess.Popen(base + (["--app=" + u] if browser_view == "kiosk" else ["--new-window", u]), creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
@@ -972,12 +986,13 @@ def auto_gate(j):
         _auto["opened"], _auto["closed_since"] = True, None
         if _auto["urls"] is None:
             _auto["urls"], _auto["view"] = list(gate_urls), running_view()
-        if (_auto["urls"] != gate_urls or _auto["view"] != browser_view) and time.time() - _auto["last_open"] >= 20:
+        if (_auto["urls"] != gate_urls or _auto["view"] != view_key()) and time.time() - _auto["last_open"] >= 20:
             log.info("%s, browser gate dibuka ulang", "daftar halaman berubah di menu Devices" if _auto["urls"] != gate_urls
-                     else "tampilan browser diubah ke " + ("kiosk" if browser_view == "kiosk" else "browser biasa"))
+                     else "tampilan browser diubah ke " + ("kiosk" if browser_view == "kiosk" else "browser biasa")
+                     + (", cetak langsung tanpa dialog" if silent_print else ", cetak dengan dialog print"))
             kill_browser()
             _safe(open_gate)
-            _auto["urls"], _auto["view"], _auto["last_open"] = list(gate_urls), browser_view, time.time()
+            _auto["urls"], _auto["view"], _auto["last_open"] = list(gate_urls), view_key(), time.time()
         elif len(gate_urls) > 1:
             multi_watch(j)
         return
@@ -990,7 +1005,7 @@ def auto_gate(j):
         log.info("membuka halaman gate otomatis (%s)", "terhubung ke server" if first else "browser gate tertutup")
         try:
             open_gate()
-            _auto["urls"], _auto["view"] = list(gate_urls), browser_view
+            _auto["urls"], _auto["view"] = list(gate_urls), view_key()
         except Exception as e:
             log.error("gagal membuka halaman gate: %s", e)
         _auto["opened"], _auto["last_open"] = True, now
@@ -2515,7 +2530,7 @@ def server_move_failed():
 
 # ---------- loop utama ----------
 def main():
-    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture, browser_view
+    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture, browser_view, silent_print
     interval = int(CFG.get("interval", 5))
     log.info("agent %s start, server %s, device %s", VERSION, SERVER, CFG["device_key"])
     psutil.cpu_percent(interval=None)
@@ -2565,6 +2580,8 @@ def main():
                     gate_url = j["gate_url"]
                 if j.get("browser_view") in ("kiosk", "window"):
                     browser_view = j["browser_view"]
+                if "silent_print" in j:
+                    silent_print = bool(j["silent_print"])
                 if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
                     support_sync(j["support"])
                 if isinstance(j.get("live"), dict):             # layar live (server lama tidak mengirim)

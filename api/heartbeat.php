@@ -168,4 +168,4 @@ json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'su
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),
     'scan_purpose_keys' => setting_patterns('scan_purpose_key'),
-    'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'browser_view' => browser_view_of($d), 'commands' => $cmds]);
+    'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'browser_view' => browser_view_of($d), 'silent_print' => silent_print_of($d) ? 1 : 0, 'commands' => $cmds]);

@@ -224,6 +224,10 @@ Agent harus berjalan sebagai Administrator (installer bawaan sudah begitu).
   Diatur untuk semua laptop di menu Pengaturan ("Browser gate layar penuh (kiosk)") dan bisa ditimpa per laptop di
   Devices ("Tampilan browser gate"). Bila diubah, browser gate di laptop dibuka ulang otomatis. Di mode kiosk tetap bisa
   memakai shortcut: Alt+← kembali, F5 / Ctrl+R refresh.
+- **Cetak langsung tanpa dialog (agent 1.22+)**: tombol print di halaman gate langsung mencetak ke **printer default Windows**
+  laptop itu, tanpa jendela pilihan printer (opsi `--kiosk-printing` Chrome / Edge, berlaku untuk kiosk maupun browser biasa).
+  Diatur di Pengaturan ("Cetak langsung tanpa dialog print", bawaan mati) dan per laptop di Devices ("Print dari halaman gate").
+  Atur printer default di Windows laptop terlebih dulu. Bila diubah, browser gate dibuka ulang otomatis.
 
 ## Melepas agent dari laptop
 Di laptop, buka folder agent (`C:\GateMon-Agent`) lalu klik dua kali **uninstall_agent.bat** (izin Administrator

@@ -9,6 +9,7 @@ $form_err = null; // isi form tambah yang gagal disimpan (modal dibuka lagi deng
 const MODES = ['gate' => 'Gate (browser + halaman gate)', 'monitor' => 'Monitor koneksi saja'];
 function post_mode() { return ($_POST['mode'] ?? '') === 'monitor' ? 'monitor' : 'gate'; }
 // tampilan browser gate: '' = ikut menu Pengaturan (NULL), kiosk / window
+function post_print() { $v = $_POST['silent_print'] ?? ''; return $v === '1' || $v === '0' ? (int)$v : null; }
 function post_view() { $v = $_POST['browser_view'] ?? ''; return $v === 'kiosk' || $v === 'window' ? $v : null; }
 $cats = $pdo->query("SELECT id, name, color FROM categories ORDER BY sort, name")->fetchAll();
 $wallpapers = $pdo->query("SELECT id, name, width, height FROM wallpapers ORDER BY id DESC")->fetchAll();
@@ -70,8 +71,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (is_supervisor() || (is_operator() 
         else {
             $token = bin2hex(random_bytes(16));
             try {
-                $pdo->prepare("INSERT INTO devices (device_key,name,gate,category_id,gate_url,mode,browser_view,camera_url,wallpaper_id,token,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW())")
-                    ->execute([$key, trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_view(), post_cam(), post_wallpaper(), $token]);
+                $pdo->prepare("INSERT INTO devices (device_key,name,gate,category_id,gate_url,mode,browser_view,silent_print,camera_url,wallpaper_id,token,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())")
+                    ->execute([$key, trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_view(), post_print(), post_cam(), post_wallpaper(), $token]);
                 $msg = "Laptop $key ditambahkan.";
             } catch (Exception $e) { $msg = "ID laptop $key sudah ada."; $form_err = $_POST; }
         }
@@ -82,8 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (is_supervisor() || (is_operator() 
     } elseif ($act === 'edit' && cam_invalid()) {
         $msg = 'URL kamera tidak valid, harus diawali http:// atau https://';
     } elseif ($act === 'edit') {
-        $pdo->prepare("UPDATE devices SET name=?, gate=?, category_id=?, gate_url=?, mode=?, browser_view=?, camera_url=?, wallpaper_id=? WHERE id=?")
-            ->execute([trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_view(), post_cam(), post_wallpaper(), (int)$_POST['id']]);
+        $pdo->prepare("UPDATE devices SET name=?, gate=?, category_id=?, gate_url=?, mode=?, browser_view=?, silent_print=?, camera_url=?, wallpaper_id=? WHERE id=?")
+            ->execute([trim($_POST['name']), trim($_POST['gate']), post_cat(), post_gate_urls(), post_mode(), post_view(), post_print(), post_cam(), post_wallpaper(), (int)$_POST['id']]);
         $msg = 'Disimpan.';
     } elseif ($act === 'enroll') {
         // Kode instalasi sekali pakai: username = ID laptop, password acak (tanpa huruf/angka yang mirip)
@@ -192,7 +193,7 @@ topbar('devices', 'Monitoring Laptop');
         $st = device_state($d, setting('offline_after'));
         $cat = $d['category_color'] ?: '#64748b';
         $data = ['id' => (int)$d['id'], 'device_key' => $d['device_key'], 'name' => $d['name'], 'gate' => $d['gate'],
-                 'category_id' => (int)$d['category_id'], 'mode' => $d['mode'], 'browser_view' => (string)$d['browser_view'], 'gate_url' => $d['gate_url'], 'camera_url' => $d['camera_url'],
+                 'category_id' => (int)$d['category_id'], 'mode' => $d['mode'], 'browser_view' => (string)$d['browser_view'], 'silent_print' => $d['silent_print'] === null ? '' : (string)(int)$d['silent_print'], 'gate_url' => $d['gate_url'], 'camera_url' => $d['camera_url'],
                  'wallpaper_id' => $d['wallpaper_id'] === null ? '' : (string)(int)$d['wallpaper_id']];
         $search = strtolower($d['device_key'] . ' ' . $d['name'] . ' ' . $d['gate'] . ' ' . $d['ip'] . ' ' . $d['hostname'] . ' ' . $d['category_name']);
     ?>
@@ -201,6 +202,7 @@ topbar('devices', 'Monitoring Laptop');
       <td data-label="Kategori"><span class="cat-badge" style="--cat:<?= h($cat) ?>"><i></i><?= h($d['category_name'] ?: 'Tanpa kategori') ?></span></td>
       <td data-label="Gate / pos"><?= $d['gate'] !== '' ? h($d['gate']) : '<span class="muted">–</span>' ?></td>
       <td data-label="Mode"><span class="badge"><?= $d['mode'] === 'monitor' ? 'Monitor koneksi' : 'Gate' ?></span><?= scan_enabled($d) ? ' <span class="badge ok-badge" title="URL halaman gate cocok pola halaman scan: hasil scan ditangkap">Scan</span>' : '' ?><?php $gu = gate_urls_of($d); echo count($gu) > 1 ? ' <span class="badge" title="' . h(implode(' | ', $gu)) . '">' . count($gu) . ' halaman</span>' : '';
+        if ($d['mode'] !== 'monitor' && silent_print_of($d)) echo ' <span class="badge" title="Print langsung ke printer default tanpa dialog' . ($d['silent_print'] === null ? ', dari menu Pengaturan' : '') . '">Cetak langsung</span>';
         if ($d['mode'] !== 'monitor' && browser_view_of($d) === 'window') echo ' <span class="badge" title="Browser gate dibuka sebagai browser biasa (address bar, back, refresh)' . ($d['browser_view'] === null ? ', dari menu Pengaturan' : '') . '">Browser biasa</span>'; ?></td>
       <td data-label="Status"><span class="state <?= $st ?>"><i></i><?= STATE_LABEL[$st] ?></span></td>
       <td data-label="IP"><?= $d['ip'] ? '<code>' . h($d['ip']) . '</code>' : '<span class="muted">–</span>' ?></td>
@@ -274,6 +276,12 @@ topbar('devices', 'Monitoring Laptop');
         </select>
         <small class="hint"><b>Kiosk</b> = layar penuh tanpa address bar / tombol back &amp; refresh (paling aman). <b>Browser biasa</b> = ada address bar, back, refresh &amp; tab, tapi petugas bisa membuka situs lain.
           Berubah = browser gate di laptop dibuka ulang. Agent <?= BROWSER_VIEW_MIN ?>+.</small></label>
+      <label class="full" id="f-print-row">Print dari halaman gate
+        <select name="silent_print" id="f-print">
+          <?php foreach (SILENT_PRINTS as $k => $v): ?><option value="<?= $k ?>" <?= (string)($fe['silent_print'] ?? '') === (string)$k ? 'selected' : '' ?>><?= h($v) ?><?= $k === '' ? ' (sekarang: ' . (setting('gate_silent_print') ? 'langsung' : 'dengan dialog') . ')' : '' ?></option><?php endforeach; ?>
+        </select>
+        <small class="hint"><b>Langsung</b> = tombol print di halaman gate langsung mencetak ke <b>printer default Windows</b> laptop ini, tanpa jendela pilihan printer.
+          Pastikan printer default di laptop sudah benar. Berubah = browser gate dibuka ulang. Agent <?= SILENT_PRINT_MIN ?>+.</small></label>
       <?php $cm = $fe['cam_mode'] ?? 'none'; $auto = str_replace('{ip}', '{IP laptop}', $CFG['camera_auto_url']); ?>
       <div class="full field">
         <span class="field-lbl">Live camera</span>
@@ -315,4 +323,4 @@ if ($show && $op):
   </div>
 </div>
 <?php endif; ?>
-<?php page_foot(['devices.js?v=7']);
+<?php page_foot(['devices.js?v=8']);
