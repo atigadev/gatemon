@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.23.0"
+VERSION = "1.24.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -1398,7 +1398,7 @@ def report(cmd_id, status, result):
 SUP_STATE = os.path.join(BASE, "support-state.json")
 SUP = requests.Session()                      # sesi sendiri: thread support tidak berbagi koneksi dengan heartbeat
 SUP.headers.update(HEADERS)
-_sup = {"on": False, "last": 0, "max": 0, "seen": 0, "emg": "", "shut": "", "msgs": [], "status": "", "err": "", "started": False, "visible": False}
+_sup = {"on": False, "last": 0, "max": 0, "seen": 0, "emg": "", "shut": "", "pos": "", "msgs": [], "status": "", "err": "", "started": False, "visible": False}
 _sup_lock = threading.Lock()
 _sup_out = collections.deque()                # kiriman yang belum diterima server
 _sup_wake = threading.Event()
@@ -1572,6 +1572,8 @@ def support_sync(s):
             _sup["emg"] = str(s.get("emg") or "")
         if on and _sup["shut"] != "sending":
             _sup["shut"] = str(s.get("shut") or "")
+        # nama gate / pos laptop ini (menu Devices): tampil di tombol Support, menu, dan judul jendela chat
+        _sup["pos"] = " ".join(str(s.get("pos") or "").split())[:40]
     _sup["on"] = on
     if on and not _sup["started"]:
         _sup["started"] = True
@@ -1637,12 +1639,14 @@ def support_show(chat):
 
 
 class SupportUI:
-    # Tombol di pojok kanan bawah: biasanya hanya satu tombol "Support" (MAIN_W). Diklik -> terbuka menu
-    # Chat Support | DARURAT | Minta Shutdown | x, dan menutup lagi sendiri setelah AUTO_CLOSE detik tanpa klik.
+    # Tombol di pojok kanan bawah: biasanya hanya satu tombol "Support · <gate / pos>" (lebar ikut teks, min MAIN_W).
+    # Diklik -> terbuka menu <gate / pos> | Chat Support | DARURAT | Minta Shutdown | x, dan menutup lagi sendiri
+    # setelah AUTO_CLOSE detik tanpa klik.
     MAIN_W, CHAT_W, SOS_W, SHUT_W, X_W, GAP, BAR_H, MARGIN, AUTO_CLOSE = 150, 150, 124, 150, 40, 8, 40, 14, 15
+    MAIN_MAX, POS_MAX = 330, 230                       # lebar maksimum tombol utama / label pos (teks panjang dipotong "…")
     KEY = 0xFF00FF                                     # warna transparan di sekitar tombol (COLORREF 0x00BBGGRR)
     C = {"blue": 0xEB6325, "amber": 0x0B9EF5, "amber2": 0x0677D9, "red": 0x2626DC, "red2": 0x1C1C99, "green": 0x4AA316,
-         "slate": 0x695547, "slate2": 0x8B7464}
+         "slate": 0x695547, "slate2": 0x8B7464, "navy": 0x3B2A1E}
     ID_SEND, ID_CANCEL, ID_LOG, ID_INPUT, ID_STATUS = 1, 2, 10, 11, 12
 
     def __init__(self):
@@ -1690,7 +1694,8 @@ class SupportUI:
             ("SetTextColor", [W.HDC, W.COLORREF], W.COLORREF), ("SetBkColor", [W.HDC, W.COLORREF], W.COLORREF), ("GetStockObject", [I], W.HGDIOBJ),
             ("CreateFontW", [I, I, I, I, I, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR], W.HFONT),
             ("CreateCompatibleDC", [W.HDC], W.HDC), ("CreateCompatibleBitmap", [W.HDC, I, I], W.HBITMAP), ("DeleteDC", [W.HDC], W.BOOL),
-            ("BitBlt", [W.HDC, I, I, I, I, W.HDC, I, I, W.DWORD], W.BOOL)]:
+            ("BitBlt", [W.HDC, I, I, I, I, W.HDC, I, I, W.DWORD], W.BOOL),
+            ("GetTextExtentPoint32W", [W.HDC, W.LPCWSTR, I, P(W.SIZE)], W.BOOL)]:
             f = getattr(g, fn)
             f.argtypes, f.restype = args, res
         k.GetModuleHandleW.argtypes, k.GetModuleHandleW.restype = [W.LPCWSTR], W.HMODULE
@@ -1702,6 +1707,7 @@ class SupportUI:
         self.items, self.lay, self.scroll, self.log_h = None, [], 0, 0      # riwayat chat (bubble)
         self.last_pos = None
         self.expanded, self.exp_at = False, 0.0                           # menu tombol terbuka + waktu klik terakhir
+        self._tw, self.title_pos = {}, None                               # lebar teks tombol (cache), pos di judul chat
 
     # ---------- persiapan: DPI, gaya kontrol Windows modern ----------
     def _setup(self):
@@ -1812,15 +1818,29 @@ class SupportUI:
 
     # ---------- tampilan ----------
     def bar_w(self):
-        if self.expanded:
-            return self.s(self.CHAT_W + self.SOS_W + self.SHUT_W + self.X_W + 3 * self.GAP)
-        return self.s(self.MAIN_W)
+        return self.buttons()[-1][1]
+
+    def text_w(self, text):
+        """Lebar teks (piksel) dengan huruf tombol, di-cache."""
+        w = self._tw.get(text)
+        if w is None:
+            u, g = self.u, self.g
+            hdc = u.GetDC(self.bar)
+            old = g.SelectObject(hdc, self.f_bar)
+            sz = self.W.SIZE()
+            g.GetTextExtentPoint32W(hdc, text, len(text), ctypes.byref(sz))
+            g.SelectObject(hdc, old)
+            u.ReleaseDC(self.bar, hdc)
+            w = self._tw[text] = sz.cx
+            if len(self._tw) > 64:
+                self._tw.clear()
+        return w
 
     def buttons(self):
         """[(x1, x2, teks, warna, aksi)] sesuai keadaan: tertutup = satu tombol yang menunjukkan status terpenting."""
         C, bl = self.C, self.blink
         n = sup_unread()
-        e, sh = _sup["emg"], _sup["shut"]
+        e, sh, pos = _sup["emg"], _sup["shut"], _sup["pos"]
         if n:
             chat = ("Pesan baru (%d)" % n, C["amber"] if bl else C["amber2"])
         else:
@@ -1847,12 +1867,17 @@ class SupportUI:
             elif sh == "rejected":
                 main = ("Shutdown ditolak", C["slate"])
             else:
-                main = ("☰  Support", C["blue"])
-            return [(0, s(self.MAIN_W)) + main + ("open",)]
+                main = ("☰  Support" + ("  ·  " + pos if pos else ""), C["blue"])
+            w = min(s(self.MAIN_MAX), max(s(self.MAIN_W), self.text_w(main[0]) + s(36)))
+            return [(0, w) + main + ("open",)]
         out, x = [], 0
+        if pos:   # label gate / pos di depan menu (bukan tombol aksi)
+            pw = min(s(self.POS_MAX), self.text_w(pos) + s(32))
+            out.append((0, pw, pos, C["navy"], "pos"))
+            x = pw + s(self.GAP)
         for w, b, act in ((self.CHAT_W, chat, "chat"), (self.SOS_W, sos, "sos"), (self.SHUT_W, shut, "shut"), (self.X_W, ("✕", C["slate"]), "close")):
-            out.append((s(x), s(x + w)) + b + (act,))
-            x += w + self.GAP
+            out.append((x, x + s(w)) + b + (act,))
+            x += s(w + self.GAP)
         return out
 
     def paint_bar(self, hwnd):
@@ -1874,7 +1899,8 @@ class SupportUI:
             g.SelectObject(hdc, ob), g.SelectObject(hdc, op)
             g.DeleteObject(br), g.DeleteObject(pen)
             r = self.W.RECT(x1, 0, x2, h)
-            u.DrawTextW(hdc, text, -1, ctypes.byref(r), 0x1 | 0x4 | 0x20)       # CENTER | VCENTER | SINGLELINE
+            r.left, r.right = x1 + self.s(12), x2 - self.s(12)
+            u.DrawTextW(hdc, text, -1, ctypes.byref(r), 0x1 | 0x4 | 0x20 | 0x800 | 0x8000)   # CENTER|VCENTER|SINGLELINE|NOPREFIX|END_ELLIPSIS
         g.SelectObject(hdc, old_font)
         u.EndPaint(hwnd, ctypes.byref(ps))
 
@@ -2048,6 +2074,9 @@ class SupportUI:
             return
         self.place()
         u.InvalidateRect(self.bar, None, False)
+        if self.title_pos != _sup["pos"]:                                        # judul jendela chat: gate / pos + nama komputer
+            self.title_pos = _sup["pos"]
+            u.SetWindowTextW(self.chat, "Chat Tim Support - " + (self.title_pos + " (" + socket.gethostname() + ")" if self.title_pos else socket.gethostname()))
         if _sup["max"] > self.beeped:
             # pesan baru dari support: bunyi lalu suara "Ada pesan masuk dari ..." (juga saat jendela chat terbuka,
             # karena petugas belum tentu sedang melihat layar)
@@ -2163,6 +2192,8 @@ class SupportUI:
                     self.set_expanded(False)
                 elif act == "close":
                     self.set_expanded(False)
+                elif act == "pos":
+                    self.exp_at = time.time()                                    # label saja: menu tetap terbuka
                 return 0
             if msg == 0x113:                                                     # WM_TIMER: kedip + tetap paling atas
                 self.tick += 1

@@ -119,6 +119,9 @@ Di pojok kanan bawah layar laptop ada dua tombol kecil yang selalu di atas jende
 - Tombol **tidak bisa ditutup** dari laptop: tidak ada tombol X, Alt+F4 tidak mengenainya, dan tidak muncul di taskbar/Alt+Tab.
   Hanya jendela chat yang bisa ditutup (X / Esc), lalu dibuka lagi lewat tombol Chat Support atau **Ctrl+Alt+S** (agent 1.12+).
   Bila tampilan tombol berhenti karena error, agent memunculkannya lagi otomatis dalam ±1 menit.
+- **Nama gate / pos** (agent 1.24+): tombol bertuliskan "Support · <gate / pos>" dari kolom Gate / pos di menu Devices
+  (kosong = nama laptop). Saat tombol dibuka, nama pos tampil di depan menu, dan juga di judul jendela chat, supaya petugas
+  tahu laptop mana yang sedang dipakai. Perubahan di menu Devices muncul di laptop pada heartbeat berikutnya.
 
 Di menu **Support** (agent 1.12+), tiap laptop punya pilihan **Ikut Pengaturan / Selalu tampil / Sembunyikan**, status tombol
 yang dilaporkan laptop (tampil di layar / tersembunyi / gagal), serta tombol **Tampilkan di layar** dan **Buka chat di layar laptop**.

@@ -528,7 +528,10 @@ function support_hb($d) {
         FROM support_msgs WHERE device_id=?");
     $st->execute([$d['id']]);
     $r = $st->fetch();
-    return ['on' => 1, 'last' => (int)$r['last'], 'emg' => $r['open'] ? 'open' : ($r['ack'] ? 'ack' : ''), 'shut' => shutdown_state($d['id'])];
+    // pos = nama gate / pos (menu Devices), cadangan nama laptop: tampil di tombol support & menu (agent >= 1.24)
+    $pos = trim((string)($d['gate'] ?? '')) !== '' ? trim($d['gate']) : (string)$d['name'];
+    return ['on' => 1, 'last' => (int)$r['last'], 'emg' => $r['open'] ? 'open' : ($r['ack'] ? 'ack' : ''), 'shut' => shutdown_state($d['id']),
+        'pos' => mb_substr($pos, 0, 40)];
 }
 // Permintaan shutdown terakhir laptop ini: pending (menunggu), approved / rejected (diputuskan dalam SUPPORT_ACK_SHOW detik terakhir), atau kosong
 function shutdown_state($device_id) {

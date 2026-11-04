@@ -1,12 +1,12 @@
 {
     "app": "gatemon-agent",
-    "version": "1.23.0",
-    "created": "2026-11-04T13:53:27+07:00",
+    "version": "1.24.0",
+    "created": "2026-11-04T18:21:02+07:00",
     "files": [
         {
             "path": "agent.py",
-            "sha256": "5e4bc5aa9b2a401c9694d297dfffc60bbcf2ed79268ad93b8676c47a702463d4",
-            "size": 139658
+            "sha256": "9bc0ad9d628977f863c3034ded6fc13205a99a8061ce19749cb34764811d834a",
+            "size": 141636
         },
         {
             "path": "requirements.txt",
