@@ -1,5 +1,6 @@
 <?php
-// Agent (>= 1.9) mengunduh rilis update: ?f=manifest | sig | <file di manifest>, ?w=<wheel di manifest>.
+// Agent (>= 1.9) mengunduh rilis update: ?f=manifest | sig | <file di manifest>, ?w=<wheel di manifest>,
+// ?f=dvr = installer Agent DVR yang tercatat di manifest (agent >= 1.23).
 // Server hanya menyajikan; keaslian diperiksa agent lewat tanda tangan Ed25519 (kunci rahasia tidak ada di server).
 require __DIR__ . '/../db.php';
 auth_device();
@@ -11,6 +12,7 @@ $f = (string)($_GET['f'] ?? '');
 $w = (string)($_GET['w'] ?? '');
 if ($f === 'manifest') $path = "$dir/release.json";
 elseif ($f === 'sig') $path = "$dir/release.sig";
+elseif ($f === 'dvr' && !empty($m['dvr']['file'])) $path = "$dir/installer/" . basename($m['dvr']['file']);
 elseif ($f !== '' && in_array($f, array_column($m['files'] ?? [], 'path'), true)) $path = "$dir/$f";
 elseif ($w !== '' && in_array($w, array_column($m['wheels'] ?? [], 'file'), true)) $path = "$dir/installer/wheels/$w";
 else json_out(['ok' => false, 'error' => 'file tidak ada di rilis'], 404);

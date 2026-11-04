@@ -6,12 +6,13 @@
 # -User/-Pass opsional untuk instalasi tanpa tanya (misal lewat skrip); tanpa itu password diketik tersembunyi.
 # -Python: pakai python.exe tertentu; -SkipTask: tanpa membuat tugas otomatis (untuk teknisi / pengujian).
 # -NoWoL: jangan ubah pengaturan Wake-on-LAN (Fast Startup & daya kartu jaringan).
+# -Dvr / -NoDvr: pasang / jangan pasang Agent DVR (live camera) dari AgentDVRSetup*.exe di paket tanpa tanya.
 # Persiapan laptop (pengganti skrip konfigurasi lama): nama komputer = nama laptop di GateMon (ditanya dulu),
 # IP kartu jaringan ke DHCP (ditanya, bawaan tidak), lalu restart (ditanya). -NoRename / -Dhcp / -Restart untuk tanpa tanya.
 # Windows Update, daya (tidak sleep) dan wallpaper TIDAK diatur di sini: agent menerapkannya dari menu Daya & Wallpaper.
 # Firewall sengaja TIDAK dimatikan: agent hanya membuat koneksi keluar ke server, tidak butuh port masuk.
 param([switch]$DryRun, [string]$Target = 'C:\GateMon-Agent', [string]$User = '', [string]$Pass = '', [string]$Python = '', [switch]$SkipTask, [switch]$NoWoL,
-      [switch]$NoRename, [switch]$Dhcp, [switch]$Restart)
+      [switch]$NoRename, [switch]$Dhcp, [switch]$Restart, [switch]$Dvr, [switch]$NoDvr)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -252,6 +253,59 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Pr
 Start-ScheduledTask -TaskName $TaskName
 
 Say "      Agent terpasang di $Target dan berjalan otomatis setiap $runAs login." Green
+
+# ---------- Agent DVR / live camera (opsional, tidak menggagalkan instalasi) ----------
+# Installer resmi AgentDVRSetup*.exe di paket (web installer: mengunduh Agent DVR dari internet), dijalankan tanpa
+# jendela (/S) hanya bila tanda tangan Authenticode-nya sah dari pembuat Agent DVR. Port web Agent DVR dibuka di
+# firewall khusus jaringan lokal (live camera di dashboard). Kamera tetap ditambahkan sekali lewat halaman Agent DVR.
+function Find-Dvr {
+    foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*') {
+        $e = @(Get-ItemProperty $k -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like '*Agent DVR*' }) | Select-Object -First 1
+        if ($e) { return $e }
+    }
+    if (Test-Path "$env:ProgramFiles\Agent\Agent.exe") { return [pscustomobject]@{ DisplayVersion = '' } }
+    return $null
+}
+$dvrExe = Get-ChildItem $Here -Filter 'AgentDVRSetup*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($dvrExe -and -not $NoDvr) {
+    $ErrorActionPreference = 'Continue'
+    Say ''
+    Say '[+] Agent DVR (live camera)' Cyan
+    $cj = $null; try { $cj = $cfgText | ConvertFrom-Json } catch {}
+    $dvrPort = 8090; if ($cj -and [int]$cj.dvr_port -gt 0) { $dvrPort = [int]$cj.dvr_port }
+    $have = Find-Dvr
+    if ($have) {
+        Say "      Sudah terpasang $($have.DisplayVersion), tidak dipasang ulang."
+    } elseif ($Dvr -or (Ask '      Pasang Agent DVR (live camera) sekarang? Perlu internet, beberapa menit.' ([bool]($cj -and $cj.install_dvr -eq $true)))) {
+        $sig = Get-AuthenticodeSignature -LiteralPath $dvrExe.FullName
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'CN=DEVELOPER IN A BOX') {
+            Say "      Dilewati: tanda tangan $($dvrExe.Name) tidak sah ($($sig.Status))." Yellow
+        } else {
+            Say "      Memasang $($dvrExe.Name) tanpa jendela (mengunduh Agent DVR dari internet)..."
+            $p = Start-Process $dvrExe.FullName -ArgumentList '/S' -PassThru
+            if (-not $p.WaitForExit(1800000)) { Say '      Installer Agent DVR belum selesai setelah 30 menit, dilewati.' Yellow }
+            elseif ($p.ExitCode -ne 0) { Say "      Installer Agent DVR gagal (kode $($p.ExitCode))." Yellow }
+            else {
+                for ($i = 0; $i -lt 60 -and -not (Find-Dvr); $i++) { Start-Sleep -Seconds 5 }
+                $have = Find-Dvr
+                if ($have) { Say "      Agent DVR terpasang $($have.DisplayVersion)." Green }
+                else { Say '      Agent DVR tidak ditemukan setelah instalasi (laptop perlu internet).' Yellow }
+            }
+        }
+    } else {
+        Say '      Dilewati. Bisa dipasang nanti dari menu Agent di dashboard.'
+    }
+    if ($have) {
+        & netsh advfirewall firewall delete rule name="GateMon Agent DVR" *> $null
+        & netsh advfirewall firewall add rule name="GateMon Agent DVR" dir=in action=allow protocol=TCP localport=$dvrPort remoteip=localsubnet profile=any *> $null
+        if ($LASTEXITCODE -eq 0) { Say "      Firewall: port $dvrPort dibuka untuk jaringan lokal saja." } else { Say '      Firewall: aturan Agent DVR gagal dibuat.' Yellow }
+        $loc = if ($have.InstallLocation) { ([string]$have.InstallLocation).Trim('" \') } else { "$env:ProgramFiles\Agent" }
+        $svc = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -like "*$loc\*" -or $_.DisplayName -like 'Agent DVR*' })
+        foreach ($s in $svc) { Set-Service $s.Name -StartupType Automatic; Start-Service $s.Name }
+        Say "      Tambahkan kamera sekali lewat http://localhost:$dvrPort di laptop ini."
+    }
+    $ErrorActionPreference = 'Stop'
+}
 
 # ---------- persiapan laptop (tidak menggagalkan instalasi) ----------
 $ErrorActionPreference = 'Continue'

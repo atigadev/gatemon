@@ -15,3 +15,9 @@ FOLDER INI = FILE TAMBAHAN UNTUK INSTALASI AGENT (ikut otomatis di paket /instal
        powershell -ExecutionPolicy Bypass -File ..\buat-wheels.ps1
    Hanya menghitung ulang SHA256SUMS.txt:
        powershell -ExecutionPolicy Bypass -File ..\buat-wheels.ps1 -HashOnly
+
+3. AgentDVRSetup.exe  = installer resmi Agent DVR (live camera), dari ispyconnect.com (opsional)
+   Web installer: laptop perlu internet saat Agent DVR dipasang. Dipasang tanpa jendela oleh installer agent
+   (ditawarkan saat instalasi) atau dari menu Agent di dashboard (agent 1.23+). Hanya dijalankan bila
+   tanda tangan Authenticode-nya sah dari pembuat Agent DVR dan sha256-nya sama dengan rilis bertanda tangan.
+   Setelah mengganti file ini, tanda tangani ulang rilis: admin-tools\rilis-agent.bat tanda-tangan <file-kunci>

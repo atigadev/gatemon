@@ -159,7 +159,9 @@ function enroll_verify($user, $pass, $from) {
 // config.json agent untuk laptop ini
 function agent_config($d, $server) {
     $example = json_decode(@file_get_contents(__DIR__ . '/agent/config.example.json'), true) ?: [];
-    return array_merge($example, ['server_url' => $server, 'device_key' => $d['device_key'], 'token' => $d['token'], 'gate_url' => '']);
+    // install_dvr: saran untuk installer agent (pasang Agent DVR bila live camera laptop ini "Agent DVR di laptop ini")
+    return array_merge($example, ['server_url' => $server, 'device_key' => $d['device_key'], 'token' => $d['token'], 'gate_url' => '',
+        'install_dvr' => ($d['camera_url'] ?? '') === 'auto', 'dvr_port' => dvr_port()]);
 }
 
 // Isi paket agent ke ZIP: file agent + isi agent/installer (python-*.exe, wheels\). Mengembalikan daftar file tambahan.
@@ -309,12 +311,44 @@ function agent_release() {
     foreach ($m['wheels'] ?? [] as $w) {
         if (@filesize("$dir/installer/wheels/{$w['file']}") !== $w['size']) $r['problems'][] = "Wheel {$w['file']} hilang / berubah.";
     }
+    $r['dvr'] = null;   // installer Agent DVR di rilis: siap bila file di server sama dengan yang ditandatangani
+    if (!empty($m['dvr']['file'])) {
+        $ok = @hash_file('sha256', "$dir/installer/" . basename($m['dvr']['file'])) === ($m['dvr']['sha256'] ?? '');
+        $r['dvr'] = ['file' => basename($m['dvr']['file']), 'ok' => $ok];
+    }
     if ($pk !== '' && function_exists('sodium_crypto_sign_verify_detached')) {   // tanpa ekstensi sodium: diperiksa agent saja
         $r['sig_ok'] = sodium_crypto_sign_verify_detached(hex2bin($sig), $raw, hex2bin($pk));
         if (!$r['sig_ok']) $r['problems'][] = 'Tanda tangan tidak cocok dengan kunci publik di agent.py.';
     }
     $r['ready'] = !$r['problems'];
     return $r;
+}
+
+// ---------- Agent DVR (live camera) di laptop (agent >= 1.23, menu Agent) ----------
+// Installer resmi (agent/installer/AgentDVRSetup*.exe, web installer NSIS: mengunduh Agent DVR dari internet) ikut
+// dalam rilis bertanda tangan (release.json "dvr"): agent hanya menjalankan file yang sha256-nya cocok dengan rilis
+// dan bertanda tangan Authenticode resmi pembuat Agent DVR.
+const DVR_MIN = '1.23.0';
+function dvr_installer() {
+    $f = glob(__DIR__ . '/agent/installer/AgentDVRSetup*.exe') ?: [];
+    return $f ? $f[0] : null;
+}
+// Port web Agent DVR dari template camera_auto_url (bawaan 8090): dibuka di firewall laptop untuk jaringan lokal
+function dvr_port() {
+    global $CFG;
+    $p = (int)parse_url(str_replace('{ip}', 'x', (string)($CFG['camera_auto_url'] ?? '')), PHP_URL_PORT);
+    return $p > 0 && $p < 65536 ? $p : 8090;
+}
+// [kelas status, teks] dari devices.dvr_state
+function dvr_label($state) {
+    $s = (string)$state;
+    if ($s === '') return ['none', 'Belum dilaporkan'];
+    if ($s === 'none') return ['none', 'Tidak terpasang'];
+    if ($s === 'installing') return ['pending', 'Sedang dipasang…'];
+    [$k, $v] = array_pad(explode(':', $s, 2), 2, '');
+    if ($k === 'running') return ['ok', 'Berjalan' . ($v !== '' ? " ($v)" : '')];
+    if ($k === 'stopped') return ['warn', 'Terpasang, tidak berjalan' . ($v !== '' ? " ($v)" : '')];
+    return ['offline', $s];
 }
 
 // ---------- wallpaper laptop (agent >= 1.9, menu Wallpaper) ----------

@@ -80,17 +80,25 @@ foreach (glob("$wdir/*.whl") as $w) {
     if (($sums[$n] ?? '') !== $h) fail("wheel $n tidak cocok / tidak terdaftar di SHA256SUMS.txt");
     $wheels[] = ['file' => $n, 'sha256' => $h, 'size' => filesize($w)];
 }
+// installer Agent DVR (opsional): satu file AgentDVRSetup*.exe di agent/installer, bertanda tangan Authenticode
+$dvr = null;
+$dvrFiles = glob("$root/agent/installer/AgentDVRSetup*.exe") ?: [];
+if (count($dvrFiles) > 1) fail('lebih dari satu AgentDVRSetup*.exe di agent/installer; sisakan satu.');
+if ($dvrFiles) {
+    $dvr = ['file' => basename($dvrFiles[0]), 'sha256' => hash_file('sha256', $dvrFiles[0]), 'size' => filesize($dvrFiles[0])];
+}
 $relFile = "$root/agent/release.json";
 if (is_file($relFile) && ($old = json_decode(file_get_contents($relFile), true)) && ($old['version'] ?? '') === $version
     && ($old['files'][0]['sha256'] ?? '') !== $files[0]['sha256']) {
     fail("agent.py berubah tetapi VERSION masih $version. Naikkan VERSION di agent.py, agent hanya memasang versi yang lebih baru.");
 }
-$manifest = json_encode(['app' => 'gatemon-agent', 'version' => $version, 'created' => date('c'), 'files' => $files, 'wheels' => $wheels],
+$manifest = json_encode(['app' => 'gatemon-agent', 'version' => $version, 'created' => date('c'), 'files' => $files, 'wheels' => $wheels] + ($dvr ? ['dvr' => $dvr] : []),
     JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 $sig = sodium_crypto_sign_detached($manifest, $sk);
 if (!sodium_crypto_sign_verify_detached($sig, $manifest, hex2bin($pk))) fail('verifikasi tanda tangan gagal');
 file_put_contents($relFile, $manifest);
 file_put_contents("$root/agent/release.sig", bin2hex($sig) . "\n");
 sodium_memzero($sk);
-echo "Rilis agent $version ditandatangani.\n  agent/release.json  (agent.py " . substr($files[0]['sha256'], 0, 12) . "..., " . count($wheels) . " wheels)\n  agent/release.sig\n"
+echo "Rilis agent $version ditandatangani.\n  agent/release.json  (agent.py " . substr($files[0]['sha256'], 0, 12) . "..., " . count($wheels) . " wheels"
+   . ($dvr ? ", {$dvr['file']}" : '') . ")\n  agent/release.sig\n"
    . "Commit kedua file itu, lalu di menu Agent klik Update.\n";

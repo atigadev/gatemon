@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.22.0"
+VERSION = "1.23.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -291,6 +291,7 @@ def collect():
         "policy_err": _pol["err"],
         **({"update_result": _upd["result"]} if _upd["result"] else {}),
         "support_ui": support_ui_state(),
+        "dvr": dvr_state(),
         **({"support_err": _sup["err"]} if _sup["err"] else {}),
     }
 
@@ -641,19 +642,25 @@ def _sha_file(p):
         return ""
 
 
-def self_update():
-    """Unduh, periksa tanda tangan & sha256, pasang library baru bila perlu, ganti file (versi lama dicadangkan)."""
-    if not IS_WIN:
-        raise RuntimeError("update otomatis hanya untuk Windows")
+def release_manifest():
+    """Manifest rilis dari server (release.json) yang tanda tangan Ed25519-nya sah; selain itu RuntimeError."""
     if not UPDATE_PUBKEY:
         raise RuntimeError("agent ini tidak punya kunci publik update (pasang ulang lewat /install/ID)")
     raw = _upd_get({"f": "manifest"}, 1 << 20)
     sig = bytes.fromhex(_upd_get({"f": "sig"}, 1024).decode("ascii").strip())
     if not ed25519_verify(bytes.fromhex(UPDATE_PUBKEY), raw, sig):
-        raise RuntimeError("tanda tangan rilis TIDAK SAH, update ditolak")
+        raise RuntimeError("tanda tangan rilis TIDAK SAH, ditolak")
     m = json.loads(raw)
     if m.get("app") != "gatemon-agent":
         raise RuntimeError("rilis bukan untuk GateMon Agent")
+    return m
+
+
+def self_update():
+    """Unduh, periksa tanda tangan & sha256, pasang library baru bila perlu, ganti file (versi lama dicadangkan)."""
+    if not IS_WIN:
+        raise RuntimeError("update otomatis hanya untuk Windows")
+    m = release_manifest()
     if _vtuple(m.get("version")) <= _vtuple(VERSION):
         return f"sudah versi terbaru ({VERSION}, rilis {m.get('version')})", False
     files = m.get("files") or []
@@ -771,6 +778,199 @@ def start_update(cmd_id):
     if _upd["busy"]:
         return
     _upd["busy"] = True
+    threading.Thread(target=_go, daemon=True).start()
+
+
+# ---------- Agent DVR (live camera) di laptop (agent >= 1.23, menu Agent) ----------
+# Installer resmi (web installer NSIS, mengunduh Agent DVR dari internet) diambil dari server lewat rilis bertanda
+# tangan: sha256 harus sama dengan release.json "dvr" DAN tanda tangan Authenticode Windows sah dari pembuat Agent DVR.
+# Dipasang tanpa jendela (/S). Port web Agent DVR dibuka di firewall hanya untuk jaringan lokal (dashboard live camera).
+DVR_SIGNER = "DEVELOPER IN A BOX"             # penerbit installer Agent DVR (ispyconnect.com)
+DVR_RULE = "GateMon Agent DVR"
+_dvr = {"busy": False, "t": 0.0, "state": "", "port": 8090}
+
+
+def _file_version(path):
+    """Versi file .exe (FileVersion), "" bila tidak terbaca. Agent DVR tidak mengisi versi di daftar program."""
+    try:
+        v = ctypes.windll.version
+        n = v.GetFileVersionInfoSizeW(path, None)
+        buf = ctypes.create_string_buffer(n)
+        ptr, ln = ctypes.c_void_p(), ctypes.c_uint()
+        if not n or not v.GetFileVersionInfoW(path, 0, n, buf) or not v.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(ln)):
+            return ""
+        ffi = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint32 * 13)).contents   # VS_FIXEDFILEINFO
+        return "%d.%d.%d.%d" % (ffi[2] >> 16, ffi[2] & 0xFFFF, ffi[3] >> 16, ffi[3] & 0xFFFF)
+    except Exception:
+        return ""
+
+
+def dvr_find():
+    """(folder, versi) Agent DVR yang terpasang, atau (None, "")."""
+    loc, ver = _dvr_find()
+    if loc and not ver:
+        ver = _file_version(os.path.join(loc, "Agent.exe"))
+    return loc, ver
+
+
+def _dvr_find():
+    """Folder Agent DVR dari daftar program Windows (DisplayName "Agent DVR"), cadangan C:\\Program Files\\Agent."""
+    if not IS_WIN:
+        return None, ""
+    import winreg
+    for path in (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"):
+        try:
+            k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+        except OSError:
+            continue
+        with k:
+            for i in range(winreg.QueryInfoKey(k)[0]):
+                try:
+                    s = winreg.OpenKey(k, winreg.EnumKey(k, i))
+                except OSError:
+                    continue
+                with s:
+                    def val(n):
+                        try:
+                            return str(winreg.QueryValueEx(s, n)[0])
+                        except OSError:
+                            return ""
+                    if "agent dvr" not in val("DisplayName").lower():
+                        continue
+                    loc = val("InstallLocation").strip('" ') or os.path.dirname(val("DisplayIcon").split(",")[0].strip('" '))
+                    return loc or os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Agent"), val("DisplayVersion")
+    p = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Agent")
+    return (p, "") if os.path.isfile(os.path.join(p, "Agent.exe")) else (None, "")
+
+
+def dvr_running(port=None):
+    try:
+        socket.create_connection(("127.0.0.1", port or _dvr["port"]), 0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+def dvr_state():
+    """Untuk heartbeat: none / stopped:VERSI / running:VERSI / installing (dicek paling sering 1 menit sekali)."""
+    if _dvr["busy"]:
+        return "installing"
+    if time.time() - _dvr["t"] >= 60 or not _dvr["state"]:
+        loc, ver = dvr_find()
+        ver = re.sub(r"[^0-9A-Za-z.\-]", "", ver)[:30]
+        _dvr["state"] = "none" if not loc else ("running:" if dvr_running() else "stopped:") + ver
+        _dvr["t"] = time.time()
+    return _dvr["state"]
+
+
+def _ps(script, env=None):
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+                       capture_output=True, text=True, timeout=120, env={**os.environ, **(env or {})},
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return (r.stdout or "").strip()
+
+
+def dvr_signature_ok(path):
+    """Tanda tangan Authenticode installer sah dan diterbitkan pembuat Agent DVR."""
+    out = _ps("$s = Get-AuthenticodeSignature -LiteralPath $env:GM_DVR_EXE; \"$($s.Status)|$($s.SignerCertificate.Subject)\"",
+              {"GM_DVR_EXE": path})
+    status, _, subj = out.partition("|")
+    return status == "Valid" and ("CN=" + DVR_SIGNER) in subj.upper(), out[:160]
+
+
+def dvr_firewall(port):
+    """Izinkan port web Agent DVR hanya dari jaringan lokal (dashboard live camera), aturan lama diganti."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", "name=" + DVR_RULE],
+                   capture_output=True, timeout=60, creationflags=flags)
+    r = subprocess.run(["netsh", "advfirewall", "firewall", "add", "rule", "name=" + DVR_RULE, "dir=in", "action=allow",
+                        "protocol=TCP", "localport=%d" % port, "remoteip=localsubnet", "profile=any"],
+                       capture_output=True, text=True, timeout=60, creationflags=flags)
+    return "dibuka untuk jaringan lokal" if r.returncode == 0 else "gagal diatur (" + (r.stdout or r.stderr).strip()[:80] + ")"
+
+
+def dvr_start(loc):
+    """Jalankan Agent DVR: layanan Windows-nya (dibuat otomatis start) bila ada, selain itu Agent.exe."""
+    # layanan Agent DVR (nama "Agent"): dipilih dari lokasi programnya, bukan namanya saja
+    out = _ps("$s = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -like ('*' + $env:GM_DVR_LOC + '\\*') -or $_.DisplayName -like 'Agent DVR*' }); "
+              "foreach ($x in $s) { Set-Service $x.Name -StartupType Automatic; Start-Service $x.Name }; $s.Count",
+              {"GM_DVR_LOC": loc or "?"})
+    if (out.splitlines() or ["0"])[-1].strip() == "0" and loc and os.path.isfile(os.path.join(loc, "Agent.exe")):
+        subprocess.Popen([os.path.join(loc, "Agent.exe")], cwd=loc, close_fds=True,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0))
+        return "Agent.exe dijalankan"
+    return "layanan dijalankan"
+
+
+def install_dvr(port):
+    if not IS_WIN:
+        raise RuntimeError("Agent DVR hanya untuk Windows")
+    loc, ver = dvr_find()
+    if loc and dvr_running(port):
+        return f"Agent DVR sudah terpasang dan berjalan ({ver or 'versi ?'}), tidak dipasang ulang"
+    if not loc:
+        m = release_manifest()
+        d = m.get("dvr") or {}
+        fn = str(d.get("file", ""))
+        if not re.fullmatch(r"AgentDVRSetup[A-Za-z0-9_.\-]*\.exe", fn):
+            raise RuntimeError("rilis di server tidak berisi installer Agent DVR (letakkan di agent/installer lalu tanda tangani rilis)")
+        data = _upd_get({"f": "dvr"}, 64 << 20)
+        if hashlib.sha256(data).hexdigest() != d.get("sha256"):
+            raise RuntimeError(f"{fn} tidak cocok dengan rilis (sha256)")
+        os.makedirs(UPD_DIR, exist_ok=True)
+        exe = os.path.join(UPD_DIR, fn)
+        with open(exe, "wb") as fh:
+            fh.write(data)
+        try:
+            ok, info = dvr_signature_ok(exe)
+            if not ok:
+                raise RuntimeError("tanda tangan installer Agent DVR tidak sah: " + info)
+            log.info("memasang Agent DVR (%s, tanpa jendela)", fn)
+            r = subprocess.run([exe, "/S"], timeout=1800, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode:
+                raise RuntimeError(f"installer Agent DVR gagal (kode {r.returncode})")
+        finally:
+            try:
+                os.remove(exe)
+            except OSError:
+                pass
+        for _ in range(60):                       # web installer: file Agent DVR bisa baru selesai diunduh sesudahnya
+            loc, ver = dvr_find()
+            if loc:
+                break
+            time.sleep(5)
+        if not loc:
+            raise RuntimeError("installer selesai tetapi Agent DVR tidak ditemukan (laptop perlu internet untuk mengunduh Agent DVR)")
+    fw = dvr_firewall(port)
+    how = dvr_start(loc)
+    run = False
+    for _ in range(30):
+        if dvr_running(port):
+            run = True
+            break
+        time.sleep(3)
+    return (f"Agent DVR {ver or ''} terpasang di {loc}; " + ("berjalan di port %d" % port if run else how + ", tetapi port %d belum menjawab" % port)
+            + f"; firewall {fw}. Tambahkan kamera sekali lewat http://IP-laptop:{port}")
+
+
+def start_dvr(cmd_id, payload):
+    """Perintah INSTALL_DVR: di thread (instalasi bisa beberapa menit), hasil dilaporkan sendiri."""
+    def _go():
+        try:
+            msg, st = install_dvr(port), "done"
+        except Exception as e:
+            log.exception("instalasi Agent DVR gagal")
+            msg, st = "Agent DVR gagal: " + str(e)[:300], "failed"
+        _dvr["busy"], _dvr["t"] = False, 0.0
+        report(cmd_id, st, msg)
+    try:
+        port = int(json.loads(payload or "{}").get("port") or _dvr["port"])
+    except (ValueError, TypeError, AttributeError):
+        port = _dvr["port"]
+    if _dvr["busy"]:
+        report(cmd_id, "failed", "instalasi Agent DVR lain masih berjalan")
+        return
+    _dvr["busy"] = True
     threading.Thread(target=_go, daemon=True).start()
 
 
@@ -2582,6 +2782,8 @@ def main():
                     browser_view = j["browser_view"]
                 if "silent_print" in j:
                     silent_print = bool(j["silent_print"])
+                if isinstance(j.get("dvr_port"), int) and 0 < j["dvr_port"] < 65536:
+                    _dvr["port"] = j["dvr_port"]
                 if isinstance(j.get("support"), dict):          # tombol Chat Support & DARURAT (server lama tidak mengirim)
                     support_sync(j["support"])
                 if isinstance(j.get("live"), dict):             # layar live (server lama tidak mengirim)
@@ -2590,6 +2792,9 @@ def main():
                     log.info("perintah #%s %s", cmd["id"], cmd["type"])
                     if cmd["type"] == "UPDATE_AGENT":            # hasil dilaporkan thread update sendiri
                         start_update(cmd["id"])
+                        continue
+                    if cmd["type"] == "INSTALL_DVR":             # Agent DVR: thread sendiri, hasil dilaporkan sendiri
+                        start_dvr(cmd["id"], cmd.get("payload"))
                         continue
                     if cmd["type"] == "SET_SERVER":              # hasil dilaporkan ke server lama SEBELUM pindah
                         try:

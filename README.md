@@ -269,6 +269,20 @@ Pilih **Live camera** saat tambah/edit laptop di menu Devices; kamera tampil di 
 Stream hanya berjalan selama panel detail terbuka. Laptop yang membuka dashboard harus bisa menjangkau IP Agent DVR.
 Bila dashboard dibuka lewat https, URL kamera juga harus https.
 
+### Pasang Agent DVR otomatis (agent 1.23+)
+Letakkan installer resmi `AgentDVRSetup.exe` (unduh dari ispyconnect.com) di `agent/installer`, lalu tanda tangani
+rilis agent (`admin-tools\rilis-agent.bat tanda-tangan ...`): sha256 installer ikut tercatat di `release.json`.
+- **Instalasi agent baru**: installer agent menawarkan memasang Agent DVR tanpa jendela (bawaan "ya" bila live camera
+  laptop itu "Agent DVR di laptop ini"; `-Dvr` / `-NoDvr` untuk tanpa tanya).
+- **Laptop yang sudah terpasang**: menu **Agent › Agent DVR (live camera)**, pasang di laptop yang dipilih atau di
+  semua laptop kamera. Agent mengunduh installer dari server, mencocokkan sha256 dengan rilis bertanda tangan **dan**
+  tanda tangan Authenticode resmi pembuat Agent DVR, lalu menjalankan `/S`. Hasil & status tampil di tabel dan menu Devices (badge DVR).
+- `AgentDVRSetup.exe` adalah web installer: laptop perlu **internet** saat instalasi (beberapa menit).
+- Port web Agent DVR (dari `camera_auto_url`, bawaan 8090) dibuka di firewall laptop **hanya untuk jaringan lokal**
+  (aturan "GateMon Agent DVR"); layanan Agent DVR dibuat otomatis start.
+- Kamera tidak ditambahkan otomatis: buka `http://IP-laptop:8090` sekali untuk menambah webcam / kamera IP.
+  Halaman Agent DVR bawaannya tanpa login: aktifkan password di pengaturan Agent DVR bila jaringan venue tidak tertutup.
+
 ## Suara peringatan
 Tombol **Suara** di Dashboard/Monitor membuka pengaturan (disimpan per browser):
 - Mode mati / nada saja / nada + suara; pilihan nada (beep, chime, sirene, alarm), suara pembaca, kecepatan, volume.

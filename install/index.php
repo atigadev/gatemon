@@ -51,6 +51,7 @@ if ($file === 'run.bat' || $file === 'paket.zip') {
         'Klik dua kali install_agent.bat dan setujui izin Administrator.',
         'config.json sudah berisi token laptop ini - JANGAN dipakai di laptop lain.',
         'Python ' . (preg_grep('#^python-.*\.exe$#i', $extra) ? 'ikut di paket ini dan dipasang otomatis bila belum ada.' : 'TIDAK ikut di paket ini; laptop harus sudah punya Python 3.'),
+        preg_grep('#^AgentDVRSetup.*\.exe$#i', $extra) ? 'Agent DVR (live camera): installer ikut; installer agent menawarkan memasangnya (perlu internet).' : '',
     ]) . "\r\n");
     $zip->close();
     log_event($d['id'], 'info', "{$d['name']}: paket instalasi diunduh dari " . ($_SERVER['REMOTE_ADDR'] ?? '?'));

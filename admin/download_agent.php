@@ -40,6 +40,7 @@ if ($id === 'installer') {
         "Server : $server",
         'Python : ' . ($py ? $py[0] . ' (dipasang otomatis bila belum ada)' : 'TIDAK disertakan - laptop harus sudah punya Python 3'),
         'Library: ' . (in_array(true, array_map(function ($r) { return strpos($r, 'wheels/') === 0; }, $extra), true) ? 'offline dari folder wheels' : 'diunduh dari internet saat instalasi'),
+        'DVR    : ' . (preg_grep('#^AgentDVRSetup.*\.exe$#i', $extra) ? 'installer Agent DVR ikut (ditawarkan saat instalasi, perlu internet)' : 'tidak disertakan'),
         '',
         'LANGKAH DI LAPTOP',
         '1. Di dashboard menu Devices, klik "Kode instalasi" pada laptop yang akan dipasang.',

@@ -147,6 +147,17 @@ if (isset($b['support_ui'])) {
     if ($ss !== (string)$d['support_state']) $pdo->prepare("UPDATE devices SET support_state=? WHERE id=?")->execute([$ss, $d['id']]);
 }
 
+// Agent DVR di laptop (agent >= 1.23): none / stopped:VERSI / running:VERSI / installing; ditulis hanya bila berubah
+if (isset($b['dvr'])) {
+    $ds = (string)$b['dvr'];
+    if (!preg_match('/^(none|installing|(running|stopped):[0-9A-Za-z.\-]{0,30})$/', $ds)) $ds = 'none';
+    if ($ds !== (string)$d['dvr_state']) {
+        $pdo->prepare("UPDATE devices SET dvr_state=? WHERE id=?")->execute([$ds, $d['id']]);
+        if ((string)$d['dvr_state'] !== '' && strpos($ds, 'stopped') === 0 && strpos((string)$d['dvr_state'], 'running') === 0)
+            log_event($d['id'], 'warn', "{$d['name']}: Agent DVR berhenti");
+    }
+}
+
 // Ambil perintah yang menunggu dan tandai sebagai terkirim
 $st = $pdo->prepare("SELECT id, type, payload FROM commands WHERE device_id=? AND status='pending' ORDER BY id");
 $st->execute([$d['id']]);
@@ -168,4 +179,4 @@ json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'su
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),
     'scan_purpose_keys' => setting_patterns('scan_purpose_key'),
-    'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'browser_view' => browser_view_of($d), 'silent_print' => silent_print_of($d) ? 1 : 0, 'commands' => $cmds]);
+    'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'browser_view' => browser_view_of($d), 'silent_print' => silent_print_of($d) ? 1 : 0, 'dvr_port' => dvr_port(), 'commands' => $cmds]);
