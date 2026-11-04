@@ -7,12 +7,14 @@
 # -Python: pakai python.exe tertentu; -SkipTask: tanpa membuat tugas otomatis (untuk teknisi / pengujian).
 # -NoWoL: jangan ubah pengaturan Wake-on-LAN (Fast Startup & daya kartu jaringan).
 # -Dvr / -NoDvr: pasang / jangan pasang Agent DVR (live camera) dari AgentDVRSetup*.exe di paket tanpa tanya.
+# -KeepInstaller: jangan hapus folder installer setelah instalasi berhasil (bawaan: paket per laptop dihapus,
+#  karena config.json di dalamnya berisi token laptop; installer umum ditanya dulu, bawaan tidak dihapus bila di USB).
 # Persiapan laptop (pengganti skrip konfigurasi lama): nama komputer = nama laptop di GateMon (ditanya dulu),
 # IP kartu jaringan ke DHCP (ditanya, bawaan tidak), lalu restart (ditanya). -NoRename / -Dhcp / -Restart untuk tanpa tanya.
 # Windows Update, daya (tidak sleep) dan wallpaper TIDAK diatur di sini: agent menerapkannya dari menu Daya & Wallpaper.
 # Firewall sengaja TIDAK dimatikan: agent hanya membuat koneksi keluar ke server, tidak butuh port masuk.
 param([switch]$DryRun, [string]$Target = 'C:\GateMon-Agent', [string]$User = '', [string]$Pass = '', [string]$Python = '', [switch]$SkipTask, [switch]$NoWoL,
-      [switch]$NoRename, [switch]$Dhcp, [switch]$Restart, [switch]$Dvr, [switch]$NoDvr)
+      [switch]$NoRename, [switch]$Dhcp, [switch]$Restart, [switch]$Dvr, [switch]$NoDvr, [switch]$KeepInstaller)
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -55,7 +57,8 @@ if (-not $DryRun -and -not $SkipTask) {   # Administrator perlu untuk C:\GateMon
 # ---------- 1. konfigurasi ----------
 $cfgText = $null
 $pkgCfg = Join-Path $Here 'config.json'
-if (Test-Path $pkgCfg) {
+$pkgHasCfg = Test-Path $pkgCfg       # paket per laptop (berisi token): folder installer dihapus setelah berhasil
+if ($pkgHasCfg) {
     Say '[1/5] config.json ada di paket, login dilewati.'
     $cfgText = [IO.File]::ReadAllText($pkgCfg)
 } else {
@@ -345,6 +348,65 @@ if (-not $static.Count) {
 }
 Say '      Windows Update, daya (tidak sleep) dan wallpaper diatur dari server: menu Daya & Wallpaper di dashboard.'
 $ErrorActionPreference = 'Stop'
+
+# ---------- hapus folder installer (tidak menggagalkan instalasi) ----------
+# Hanya file paket yang dikenal yang dihapus, lalu foldernya bila sudah kosong: file lain milik pengguna tidak
+# disentuh (mis. paket diekstrak langsung ke Downloads). Tidak pernah menyentuh folder agent ($Target).
+function Remove-Installer {
+    $dir = (Resolve-Path -LiteralPath $Here).Path.TrimEnd('\')
+    $tgt = [IO.Path]::GetFullPath($Target).TrimEnd('\')
+    if ($dir -ieq $tgt -or $dir.StartsWith("$tgt\", 'OrdinalIgnoreCase') -or $tgt.StartsWith("$dir\", 'OrdinalIgnoreCase')) { return 'jalan dari folder agent' }
+    if ([IO.Path]::GetPathRoot($dir).TrimEnd('\') -ieq $dir) { return 'akar drive' }
+    $files = @('agent.py', 'requirements.txt', 'install_agent.ps1', 'uninstall_agent.bat', 'uninstall_agent.ps1', 'config.json', 'server.txt', 'BACA-SAYA.txt' |
+        ForEach-Object { Join-Path $dir $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    $files += @(Get-ChildItem -LiteralPath $dir -File -Filter 'python-*.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    $files += @(Get-ChildItem -LiteralPath $dir -File -Filter 'AgentDVRSetup*.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    foreach ($p in $files) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    $wh = Join-Path $dir 'wheels'
+    if (Test-Path -LiteralPath $wh -PathType Container) {
+        Get-ChildItem -LiteralPath $wh -File | Where-Object { $_.Name -like '*.whl' -or $_.Name -eq 'SHA256SUMS.txt' } | Remove-Item -Force -ErrorAction SilentlyContinue
+        if (-not @(Get-ChildItem -LiteralPath $wh -Force).Count) { Remove-Item -LiteralPath $wh -Force -ErrorAction SilentlyContinue }
+    }
+    # paket ZIP per laptop di sebelah folder (berisi token juga): GateMon-Agent-<ID>-v<versi>.zip
+    $leaf = Split-Path $dir -Leaf
+    if ($pkgHasCfg -and $leaf -match '^GateMon-Agent-[A-Za-z0-9_-]+-v[0-9.]+$') {
+        foreach ($z in @((Join-Path (Split-Path $dir) "$leaf.zip"), (Join-Path (Split-Path (Split-Path $dir)) "$leaf.zip"))) {
+            if (Test-Path -LiteralPath $z -PathType Leaf) { Remove-Item -LiteralPath $z -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    # install_agent.bat masih dibaca cmd.exe sampai jendela ini ditutup: dihapus proses kecil tersembunyi setelah
+    # jendela tertutup, bersama folder paket (dan folder luar hasil Extract All yang namanya sama) bila sudah kosong
+    $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction SilentlyContinue).ParentProcessId
+    $isCmd = $parent -and ((Get-Process -Id $parent -ErrorAction SilentlyContinue).ProcessName -ieq 'cmd')
+    $wait = if ($isCmd) { "try { Wait-Process -Id $parent -Timeout 3600 -ErrorAction Stop } catch {}; Start-Sleep -Seconds 1; " } else { '' }
+    $d = & $q $dir
+    $cmd = $wait + "`$d = $d; `$b = Join-Path `$d 'install_agent.bat'; if (Test-Path -LiteralPath `$b) { Remove-Item -LiteralPath `$b -Force }; " +
+        "if (-not @(Get-ChildItem -LiteralPath `$d -Force).Count) { Remove-Item -LiteralPath `$d -Force; `$p = Split-Path `$d; " +
+        "if ((Split-Path `$p -Leaf) -ieq (Split-Path `$d -Leaf) -and -not @(Get-ChildItem -LiteralPath `$p -Force).Count) { Remove-Item -LiteralPath `$p -Force } }"
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc -WorkingDirectory $env:TEMP -WindowStyle Hidden
+    return ''
+}
+if (-not $DryRun -and -not $SkipTask -and -not $KeepInstaller) {
+    $ErrorActionPreference = 'Continue'
+    $usb = $false
+    try { $usb = (Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='" + (Split-Path -Qualifier $Here) + "'")).DriveType -eq 2 } catch {}
+    # paket per laptop berisi token: selalu dihapus. Installer umum (login kode instalasi) bisa dipakai ulang:
+    # ditanya dulu, bawaan tidak dihapus bila dijalankan dari flashdisk.
+    $rm = $pkgHasCfg -or (Ask "      Hapus folder installer $Here ?" (-not $usb))
+    Say ''
+    if ($rm) {
+        try {
+            $why = Remove-Installer
+            if ($why) { Say "      Folder installer tidak dihapus ($why)." }
+            else { Say ("      Folder installer dihapus setelah jendela ini ditutup: $Here" + $(if ($pkgHasCfg) { ' (paket berisi token laptop)' } else { '' })) }
+        } catch { Say "      Folder installer gagal dihapus: $($_.Exception.Message)" Yellow }
+    } else {
+        Say "      Folder installer tidak dihapus: $Here"
+    }
+    $ErrorActionPreference = 'Stop'
+}
 
 Say ''
 Say 'Selesai. Cek laptop ini di dashboard GateMon (biasanya online dalam beberapa detik).' Green

@@ -50,6 +50,7 @@ if ($file === 'run.bat' || $file === 'paket.zip') {
         "GATEMON AGENT - $id ({$d['name']})", "Server: $server", '',
         'Klik dua kali install_agent.bat dan setujui izin Administrator.',
         'config.json sudah berisi token laptop ini - JANGAN dipakai di laptop lain.',
+        'Setelah instalasi berhasil, folder ini dan file ZIP-nya dihapus otomatis.',
         'Python ' . (preg_grep('#^python-.*\.exe$#i', $extra) ? 'ikut di paket ini dan dipasang otomatis bila belum ada.' : 'TIDAK ikut di paket ini; laptop harus sudah punya Python 3.'),
         preg_grep('#^AgentDVRSetup.*\.exe$#i', $extra) ? 'Agent DVR (live camera): installer ikut; installer agent menawarkan memasangnya (perlu internet).' : '',
     ]) . "\r\n");
@@ -107,7 +108,7 @@ send_csp();
   <ol class="steps">
     <li>Buka folder Downloads, klik kanan file ZIP tadi → <b>Extract All…</b> → <b>Extract</b>.<br><span class="muted">Jangan dijalankan langsung dari dalam ZIP.</span></li>
     <li>Di folder hasil ekstrak, klik dua kali <b>install_agent.bat</b>.<br><span class="muted">Bila muncul "Windows protected your PC", klik <i>More info</i> lalu <i>Run anyway</i>.</span></li>
-    <li>Setujui izin Administrator, tunggu sampai selesai: Python dan library dipasang dari paket (tanpa internet), agent langsung berjalan.</li>
+    <li>Setujui izin Administrator, tunggu sampai selesai: Python dan library dipasang dari paket (tanpa internet), agent langsung berjalan.<br><span class="muted">Setelah berhasil, folder hasil ekstrak dan file ZIP-nya dihapus otomatis (berisi token laptop ini).</span></li>
   </ol>
   <a class="btn btn-primary" href="<?= e($done['zip']) ?>">Unduh ulang paket ZIP</a>
   <p class="muted small">Link unduhan berlaku <?= TICKET_MIN ?> menit dan hanya untuk laptop ini. Kode instalasi sudah hangus.</p>

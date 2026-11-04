@@ -30,6 +30,10 @@ Bukan sistem validasi: halaman validasi yang sudah ada (form-scanning-gate.php) 
    Installer tidak mengunduh apa pun (installer .bat pengunduh lama diblokir antivirus sebagai "Virus detected"), memasang Python bila belum ada, library, menyalin ke `C:\GateMon-Agent`, dan menjalankan agent
    (tugas terjadwal saat login, tetap jalan saat baterai, restart otomatis). Link unduhan berlaku 30 menit.
    Kode langsung hangus dan token lama tidak berlaku lagi.
+   Setelah instalasi berhasil, **folder installer dihapus otomatis**. Paket per laptop (config.json berisi token)
+   selalu dihapus bersama file ZIP-nya. Installer umum ditanya dulu, dan bawaannya tidak dihapus bila dijalankan dari flashdisk.
+   Yang dihapus hanya file paket; file lain di folder itu tidak disentuh, dan folder `C:\GateMon-Agent` tidak ikut.
+   `install_agent.bat` serta foldernya terhapus setelah jendela installer ditutup. Pakai `-KeepInstaller` untuk menyimpannya.
    Alternatif: **Installer umum (ZIP)** (login di jendela installer) atau **ZIP per laptop** (config.json berisi token, tanpa login).
 
 Manual lengkap ada di dokumen "Manual GateMon".
@@ -63,6 +67,7 @@ Manual lengkap ada di dokumen "Manual GateMon".
 
 Menu **Log** berisi semua kejadian per laptop: offline / online kembali (dengan lama offline), browser gate tertutup, halaman gate tidak bisa diakses, tombol DARURAT, permintaan shutdown, perintah & hasilnya, instalasi / update agent, wallpaper, daya, Agent DVR, dan aksi admin.
 
+- **Rekap per kategori**: jumlah laptop, laptop yang offline sekarang, kejadian, offline, gangguan gate, peringatan, error, darurat, laptop paling bermasalah, dan kejadian terakhir. Klik nama kategori untuk laporan kategori itu saja (ringkasan, laptop di kategori itu, dan kejadiannya); CSV ikut berisi kolom kategori.
 - **Rekap per laptop** untuk periode yang dipilih: jumlah kejadian, offline, gangguan gate, peringatan, error, darurat, dan waktu kejadian terakhir. Klik nama laptop untuk melihat lognya saja.
 - Filter laptop, tingkat (info / peringatan / error), jenis, tanggal (maks. ±3 bulan), dan cari teks. Tombol **Cetak / PDF** dan **Unduh CSV** (untuk Excel) tersedia.
 - Dari dashboard: klik card laptop, lalu pilih **Log kejadian laptop ini**.

@@ -1,7 +1,8 @@
 <?php
 // Log kejadian per laptop (agent): offline / online, browser & halaman gate, darurat, perintah, instalasi, dll.
-// Filter laptop, tingkat, jenis, periode, cari teks; rekap per laptop; cetak / PDF dan unduh CSV.
-//   ?d=ID laptop (0 = semua, -1 = sistem / admin tanpa laptop) &lv=info|warn|error|issue &k=jenis &from &to &q &p=halaman &csv=1
+// Filter kategori, laptop, tingkat, jenis, periode, cari teks; rekap per kategori & per laptop; cetak / PDF dan unduh CSV.
+//   ?c=ID kategori (0 = semua, -1 = tanpa kategori) &d=ID laptop (0 = semua, -1 = sistem / admin tanpa laptop; laptop mengalahkan kategori)
+//   &lv=info|warn|error|issue &k=jenis &from &to &q &p=halaman &csv=1
 require __DIR__ . '/auth.php';
 require_login();
 $pdo = db();
@@ -15,15 +16,23 @@ $to = $valid($_GET['to'] ?? '') ?: $today;
 if ($to < $from) [$from, $to] = [$to, $from];
 if ((strtotime($to) - strtotime($from)) / 86400 > 92) $from = date('Y-m-d', strtotime($to) - 92 * 86400);   // maks ±3 bulan
 $dev = (int)($_GET['d'] ?? 0);
+$cat = (int)($_GET['c'] ?? 0);
 $lv = in_array($_GET['lv'] ?? '', ['info', 'warn', 'error', 'issue'], true) ? $_GET['lv'] : '';
 $kind = isset(LOG_KINDS[$_GET['k'] ?? '']) ? $_GET['k'] : '';
 $q = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 100);
 $page = max(1, (int)($_GET['p'] ?? 1));
 
 $devices = $pdo->query("SELECT d.id, d.name, d.device_key, d.mode, d.last_seen, d.browser_running, d.gate_url_ok, d.hostname, d.ip, d.agent_version,
-    c.name AS cat, c.color FROM devices d LEFT JOIN categories c ON c.id=d.category_id ORDER BY c.sort IS NULL, c.sort, c.name, d.name")->fetchAll();
+    d.category_id, c.name AS cat, c.color FROM devices d LEFT JOIN categories c ON c.id=d.category_id ORDER BY c.sort IS NULL, c.sort, c.name, d.name")->fetchAll();
 $by_id = array_column($devices, null, 'id');
 if ($dev > 0 && !isset($by_id[$dev])) $dev = 0;
+$cats = $pdo->query("SELECT id, name, color FROM categories ORDER BY sort, name")->fetchAll();
+$cat_by = array_column($cats, null, 'id');
+if ($cat > 0 && !isset($cat_by[$cat])) $cat = 0;
+if ($dev !== 0) $cat = 0;                                            // laptop / sistem dipilih: kategori diabaikan
+$cat_of = function ($d) { return $d['category_id'] && $d['cat'] !== null ? (int)$d['category_id'] : -1; };
+$cat_name = $cat > 0 ? $cat_by[$cat]['name'] : ($cat === -1 ? 'Tanpa kategori' : '');
+$cat_ids = $cat ? array_map('intval', array_column(array_filter($devices, function ($d) use ($cat, $cat_of) { return $cat_of($d) === $cat; }), 'id')) : [];
 $off = setting('offline_after');
 
 // ---------- query kejadian sesuai filter ----------
@@ -32,6 +41,7 @@ $where = ['l.created_at >= ?', 'l.created_at < ?'];
 $params = $rng;
 if ($dev > 0) { $where[] = 'l.device_id = ?'; $params[] = $dev; }
 elseif ($dev === -1) $where[] = 'l.device_id IS NULL';
+elseif ($cat) $where[] = $cat_ids ? 'l.device_id IN (' . implode(',', $cat_ids) . ')' : '1=0';   // id angka dari database
 if ($lv === 'issue') $where[] = "l.level <> 'info'";
 elseif ($lv !== '') { $where[] = 'l.level = ?'; $params[] = $lv; }
 if ($kind !== '') $where[] = log_kind_sql($kind, $params);
@@ -41,14 +51,15 @@ $run = function ($sql, $p) use ($pdo) { $st = $pdo->prepare($sql); $st->execute(
 
 $lv_name = ['info' => 'Info', 'warn' => 'Peringatan', 'error' => 'Error'];
 if (isset($_GET['csv'])) {
-    $rows = [['waktu', 'laptop', 'id_laptop', 'tingkat', 'jenis', 'kejadian']];
+    $rows = [['waktu', 'kategori', 'laptop', 'id_laptop', 'tingkat', 'jenis', 'kejadian']];
     foreach ($run("SELECT l.* FROM logs l WHERE $w ORDER BY l.id LIMIT 50000", $params) as $r) {
         $dv = $by_id[$r['device_id']] ?? null;
         $k = log_kind_of($r['message']);
-        $rows[] = [$r['created_at'], $dv ? $dv['name'] : ($r['device_id'] ? '(laptop dihapus)' : 'Sistem / admin'), $dv['device_key'] ?? '',
+        $rows[] = [$r['created_at'], $dv ? ($dv['cat'] ?? 'Tanpa kategori') : '', $dv ? $dv['name'] : ($r['device_id'] ? '(laptop dihapus)' : 'Sistem / admin'), $dv['device_key'] ?? '',
             $lv_name[$r['level']] ?? $r['level'], $k ? LOG_KINDS[$k][0] : 'Lain-lain', $r['message']];
     }
-    csv_send('gatemon-log-' . ($dev > 0 ? $by_id[$dev]['device_key'] . '-' : '') . $from . '_' . $to . '.csv', $rows);
+    $tag = $dev > 0 ? $by_id[$dev]['device_key'] . '-' : ($cat ? trim(preg_replace('/[^A-Za-z0-9]+/', '-', $cat_name), '-') . '-' : '');
+    csv_send('gatemon-log-' . $tag . $from . '_' . $to . '.csv', $rows);
 }
 
 $total = (int)$run("SELECT COUNT(*) FROM logs l WHERE $w", $params)->fetchColumn();
@@ -65,16 +76,34 @@ $blank = ['n' => 0, 'e' => 0, 'w' => 0, 'off' => 0, 'emg' => 0, 'gate' => 0, 'la
 $rekap = [];
 foreach ($devices as $d) $rekap[] = $d + ['s' => ($sum[$d['id']] ?? []) + $blank, 'state' => device_state($d, $off)];
 usort($rekap, function ($a, $b) { return [$b['s']['e'] + $b['s']['w'], $b['s']['n']] <=> [$a['s']['e'] + $a['s']['w'], $a['s']['n']]; });
-$S = $dev > 0 ? (($sum[$dev] ?? []) + $blank) : null;
 
-$qs = function ($over = []) use ($dev, $lv, $kind, $from, $to, $q) {
-    return h(http_build_query(array_filter(array_merge(['d' => $dev ?: null, 'lv' => $lv, 'k' => $kind, 'from' => $from, 'to' => $to, 'q' => $q], $over),
+// ---------- rekap per kategori: jumlah dari rekap laptop di kategori itu ----------
+$rcat = [];
+foreach ($cats as $c) $rcat[(int)$c['id']] = ['id' => (int)$c['id'], 'name' => $c['name'], 'color' => $c['color']];
+$rcat[-1] = ['id' => -1, 'name' => 'Tanpa kategori', 'color' => '#9aa5b1'];
+foreach ($rcat as &$c) $c += ['laptops' => 0, 'offline_now' => 0, 'worst' => null] + $blank;
+unset($c);
+foreach ($rekap as $d) {
+    $c = &$rcat[$cat_of($d)];
+    $c['laptops']++;
+    if ($d['state'] === 'offline') $c['offline_now']++;
+    foreach (['n', 'e', 'w', 'off', 'emg', 'gate'] as $k) $c[$k] += (int)$d['s'][$k];
+    if ($d['s']['last'] && (!$c['last'] || $d['s']['last'] > $c['last'])) $c['last'] = $d['s']['last'];
+    if (!$c['worst'] && $d['s']['e'] + $d['s']['w'] > 0) $c['worst'] = $d;   // rekap sudah urut paling bermasalah dulu
+    unset($c);
+}
+$rcat = array_filter($rcat, function ($c) { return $c['laptops'] > 0 || $c['id'] > 0; });
+if ($cat) $rekap = array_values(array_filter($rekap, function ($d) use ($cat, $cat_of) { return $cat_of($d) === $cat; }));
+$S = $dev > 0 ? (($sum[$dev] ?? []) + $blank) : ($cat ? $rcat[$cat] : null);
+
+$qs = function ($over = []) use ($cat, $dev, $lv, $kind, $from, $to, $q) {
+    return h(http_build_query(array_filter(array_merge(['c' => $cat ?: null, 'd' => $dev ?: null, 'lv' => $lv, 'k' => $kind, 'from' => $from, 'to' => $to, 'q' => $q], $over),
         function ($v) { return $v !== null && $v !== '' && $v !== 0; })));
 };
 $tgl = function ($s) { return date('d/m/Y', strtotime($s)); };
 $period = $from === $to ? $tgl($from) : $tgl($from) . ' – ' . $tgl($to);
 $state_txt = ['ok' => 'Sehat', 'warn' => 'Ada masalah', 'offline' => 'Offline'];
-$title = $dev > 0 ? 'Log ' . $by_id[$dev]['name'] : ($dev === -1 ? 'Log sistem / admin' : 'Log kejadian');
+$title = $dev > 0 ? 'Log ' . $by_id[$dev]['name'] : ($dev === -1 ? 'Log sistem / admin' : ($cat ? 'Log kategori ' . $cat_name : 'Log kejadian'));
 
 page_head($title);
 topbar('logs', 'Monitoring Laptop');
@@ -83,9 +112,11 @@ topbar('logs', 'Monitoring Laptop');
   <div class="page-head">
     <div><h1><?= h($title) ?><?php if ($dev > 0): $D = $by_id[$dev]; ?> <code class="muted"><?= h($D['device_key']) ?></code><?php endif; ?></h1>
       <p class="muted"><?= h($period) ?> · <?= $total ?> kejadian<?php if ($dev > 0): ?> · <?= h($D['cat'] ?? 'Tanpa kategori') ?> · sekarang
-        <?php $st_now = device_state($D, $off); ?><span class="state <?= $st_now ?>"><i></i><?= $state_txt[$st_now] ?></span><?php endif; ?></p></div>
+        <?php $st_now = device_state($D, $off); ?><span class="state <?= $st_now ?>"><i></i><?= $state_txt[$st_now] ?></span><?php endif; ?><?php
+        if ($S && $cat): ?> · <?= (int)$S['laptops'] ?> laptop, <?= (int)$S['offline_now'] ?> offline sekarang<?php endif; ?></p></div>
     <div class="rep-head-actions no-print">
-      <?php if ($dev !== 0): ?><a class="btn" href="logs.php?<?= $qs(['d' => null]) ?>">Semua laptop</a><?php endif; ?>
+      <?php if ($dev > 0 && $by_id[$dev]['category_id'] !== null): ?><a class="btn" href="logs.php?<?= $qs(['d' => null, 'c' => $cat_of($by_id[$dev])]) ?>">Kategori <?= h($by_id[$dev]['cat'] ?? '') ?></a><?php endif; ?>
+      <?php if ($dev !== 0 || $cat): ?><a class="btn" href="logs.php?<?= $qs(['d' => null, 'c' => null]) ?>">Semua laptop</a><?php endif; ?>
       <button type="button" class="btn" data-print><?= icon('download') ?> Cetak / PDF</button>
       <a class="btn btn-primary" href="logs.php?<?= $qs(['csv' => 1]) ?>"><?= icon('download') ?> Unduh CSV</a>
     </div>
@@ -93,6 +124,10 @@ topbar('logs', 'Monitoring Laptop');
 
   <section class="card no-print">
     <form method="get" class="filters rep-filters">
+      <label>Kategori <select name="c">
+        <option value="0">Semua kategori</option>
+        <?php foreach ($rcat as $c): ?><option value="<?= $c['id'] ?>" <?= $cat === $c['id'] ? 'selected' : '' ?>><?= h($c['name']) ?></option><?php endforeach; ?>
+      </select></label>
       <label>Laptop <select name="d">
         <option value="0">Semua laptop</option>
         <?php foreach ($devices as $d): ?><option value="<?= $d['id'] ?>" <?= $dev === (int)$d['id'] ? 'selected' : '' ?>><?= h($d['name'] . ' (' . $d['device_key'] . ')') ?></option><?php endforeach; ?>
@@ -121,9 +156,36 @@ topbar('logs', 'Monitoring Laptop');
     <div class="stat warn"><span class="label">Gangguan gate (browser / halaman)</span><span class="value"><?= (int)$S['gate'] ?></span><span class="sic"><?= icon('monitor') ?></span></div>
     <div class="stat offline"><span class="label">Error · darurat</span><span class="value"><?= (int)$S['e'] ?> · <?= (int)$S['emg'] ?></span><span class="sic"><?= icon('x') ?></span></div>
   </section>
-  <?php elseif ($dev === 0): ?>
+  <?php endif; ?>
+  <?php if ($dev === 0): ?>
   <section class="card">
-    <h2><?= icon('devices') ?> Rekap per laptop <span class="badge"><?= h($period) ?></span></h2>
+    <h2><?= icon('tag') ?> Rekap per kategori <span class="badge"><?= h($period) ?></span></h2>
+    <div class="table-wrap"><table class="table small log-rekap">
+      <thead><tr><th>Kategori</th><th class="right">Laptop</th><th class="right" title="Laptop yang sekarang offline">Offline sekarang</th><th class="right">Kejadian</th>
+        <th class="right">Offline</th><th class="right" title="Browser gate tertutup / halaman gate tidak bisa diakses">Gangguan gate</th><th class="right">Peringatan</th>
+        <th class="right">Error</th><th class="right">Darurat</th><th>Paling bermasalah</th><th>Kejadian terakhir</th></tr></thead>
+      <tbody>
+      <?php foreach ($rcat as $c): ?>
+      <tr class="<?= $c['n'] ? '' : 'daily-empty' ?><?= $cat === $c['id'] ? ' log-sel' : '' ?>">
+        <td><span class="cat-dot" style="--c:<?= h($c['color']) ?>"></span><a href="logs.php?<?= $qs(['c' => $c['id'], 'p' => null]) ?>"><b><?= h($c['name']) ?></b></a></td>
+        <td class="right mono"><?= $c['laptops'] ?></td>
+        <td class="right mono<?= $c['offline_now'] ? ' bad' : '' ?>"><?= $c['offline_now'] ?></td>
+        <td class="right mono"><?= $c['n'] ?></td>
+        <td class="right mono<?= $c['off'] ? ' bad' : '' ?>"><?= $c['off'] ?></td>
+        <td class="right mono<?= $c['gate'] ? ' bad' : '' ?>"><?= $c['gate'] ?></td>
+        <td class="right mono"><?= $c['w'] ?></td>
+        <td class="right mono<?= $c['e'] ? ' bad' : '' ?>"><?= $c['e'] ?></td>
+        <td class="right mono<?= $c['emg'] ? ' bad' : '' ?>"><?= $c['emg'] ?></td>
+        <td><?= $c['worst'] ? '<a href="logs.php?' . $qs(['d' => $c['worst']['id'], 'c' => null, 'p' => null]) . '">' . h($c['worst']['name']) . '</a> <small class="muted">' . ($c['worst']['s']['e'] + $c['worst']['s']['w']) . ' gangguan</small>' : '<span class="muted">–</span>' ?></td>
+        <td class="muted"><?= $c['last'] ? h(date('d/m H:i', strtotime($c['last']))) : '–' ?></td>
+      </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+  </section>
+  <section class="card">
+    <h2><?= icon('devices') ?> Rekap per laptop<?= $cat ? ' · ' . h($cat_name) : '' ?> <span class="badge"><?= h($period) ?></span></h2>
+    <?php if (!$rekap): ?><p class="muted">Tidak ada laptop di kategori ini.</p><?php endif; ?>
     <div class="table-wrap"><table class="table small log-rekap">
       <thead><tr><th>Laptop</th><th>Kategori</th><th>Sekarang</th><th class="right">Kejadian</th><th class="right">Offline</th>
         <th class="right" title="Browser gate tertutup / halaman gate tidak bisa diakses">Gangguan gate</th><th class="right">Peringatan</th><th class="right">Error</th>
@@ -131,7 +193,7 @@ topbar('logs', 'Monitoring Laptop');
       <tbody>
       <?php foreach ($rekap as $d): $s = $d['s']; ?>
       <tr class="<?= $s['n'] ? '' : 'daily-empty' ?>">
-        <td><a href="logs.php?<?= $qs(['d' => $d['id']]) ?>"><b><?= h($d['name']) ?></b></a> <code class="muted"><?= h($d['device_key']) ?></code></td>
+        <td><a href="logs.php?<?= $qs(['d' => $d['id'], 'c' => null, 'p' => null]) ?>"><b><?= h($d['name']) ?></b></a> <code class="muted"><?= h($d['device_key']) ?></code></td>
         <td class="muted"><?= h($d['cat'] ?? '–') ?></td>
         <td><span class="state <?= $d['state'] ?>"><i></i><?= $state_txt[$d['state']] ?></span></td>
         <td class="right mono"><?= (int)$s['n'] ?></td>
