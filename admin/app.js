@@ -118,6 +118,7 @@ function detailHtml(d){
     ${line('Baterai / uptime', (d.battery==null?'-':d.battery+'%'+(d.battery_plugged?' ⚡':''))+' / '+fmtUp(d.uptime_sec))}
     ${line('Terakhir lapor / agent', esc(d.last_seen||'belum pernah')+' / '+esc(d.agent_version||'-'))}
     ${radmin||cmds ? `<div class="actions">${canLive(d) ? `<a class="btn btn-primary" href="live.php?dev=${d.id}" target="_blank" rel="noopener" title="Lihat layar laptop secara langsung (tanpa Radmin)">Layar live</a>` : ''}${radmin}${cmds}</div>` : ''}
+    <p class="small"><a href="logs.php?d=${d.id}">Log kejadian laptop ini ›</a></p>
     ${uninstallBox(d)}
     ${recentCmds(d)}
     ${d.scan_enabled ? `<div class="scan-box"><h4>Scan hari ini <span class="scan-chips">${scanChips(d.scan)}</span>

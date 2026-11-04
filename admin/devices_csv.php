@@ -32,21 +32,7 @@ $cat_name = array_column($cats, 'name', 'id');
 $wp_name = array_column($wps, 'name', 'id');
 $lc = function ($s) { return function_exists('mb_strtolower') ? mb_strtolower(trim($s), 'UTF-8') : strtolower(trim($s)); };
 
-// sel yang diawali = + - @ dibuka Excel sebagai rumus (CSV injection): diberi awalan ' (dibuang lagi saat import)
-function csv_cell($v) {
-    $v = (string)$v;
-    if ($v !== '' && strpos("=+-@\t\r", $v[0]) !== false) $v = "'" . $v;
-    return '"' . str_replace('"', '""', $v) . '"';
-}
-function csv_send($name, $rows) {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $name . '"');
-    header('Cache-Control: no-store');
-    // BOM agar Excel membaca UTF-8; titik koma = pemisah daftar Excel berbahasa Indonesia
-    echo "\xEF\xBB\xBF";
-    foreach ($rows as $r) echo implode(';', array_map('csv_cell', $r)), "\r\n";
-    exit;
-}
+// csv_cell / csv_send (db.php): sel yang diawali = + - @ diberi awalan ' (dibuang lagi saat import)
 
 if (isset($_GET['template'])) csv_send('gatemon-template-laptop.csv', [array_keys(CSV_COLS)]);
 if (isset($_GET['export'])) {

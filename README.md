@@ -59,6 +59,15 @@ Manual lengkap ada di dokumen "Manual GateMon".
 - Paket berisi hash password & token laptop: simpan di tempat aman, hapus setelah dipakai.
   Folder `migrasi/` ditutup dari web (`.htaccess`).
 
+## Log kejadian per laptop (menu Log)
+
+Menu **Log** berisi semua kejadian per laptop: offline / online kembali (dengan lama offline), browser gate tertutup, halaman gate tidak bisa diakses, tombol DARURAT, permintaan shutdown, perintah & hasilnya, instalasi / update agent, wallpaper, daya, Agent DVR, dan aksi admin.
+
+- **Rekap per laptop** untuk periode yang dipilih: jumlah kejadian, offline, gangguan gate, peringatan, error, darurat, dan waktu kejadian terakhir. Klik nama laptop untuk melihat lognya saja.
+- Filter laptop, tingkat (info / peringatan / error), jenis, tanggal (maks. ±3 bulan), dan cari teks. Tombol **Cetak / PDF** dan **Unduh CSV** (untuk Excel) tersedia.
+- Dari dashboard: klik card laptop, lalu pilih **Log kejadian laptop ini**.
+- Offline dicatat sekali saat laptop berhenti melapor lebih dari batas offline (menu Pengaturan). Pencatatan dilakukan oleh heartbeat laptop lain atau dashboard yang terbuka. Saat laptop online kembali, lama offline-nya ikut tercatat.
+
 ## Kategori lokasi
 Menu **Kategori** (supervisor) untuk mengatur lokasi laptop: Gate, Tiket Box, Convention, Opening, Lain-lain
 (bisa ditambah, diubah nama/warna/urutan). Pilih kategori tiap laptop di menu Devices.

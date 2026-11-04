@@ -4,6 +4,7 @@ require __DIR__ . '/auth.php';
 if (!current_user()) json_out(['ok' => false, 'error' => 'login required'], 401);
 $pdo = db();
 $off = setting('offline_after');
+log_offline_devices();
 
 $cats = $pdo->query("SELECT id, name, color FROM categories ORDER BY sort, name")->fetchAll();
 $devices = $pdo->query("SELECT d.*, c.name AS category_name, c.color AS category_color FROM devices d

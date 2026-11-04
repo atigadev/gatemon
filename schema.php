@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 17;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA); 16 = cetak langsung tanpa dialog per laptop (agent 1.22); 17 = status Agent DVR di laptop (agent 1.23)
+const SCHEMA_VERSION = 18;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA); 16 = cetak langsung tanpa dialog per laptop (agent 1.22); 17 = status Agent DVR di laptop (agent 1.23); 18 = log kejadian per laptop (offline tercatat)
 
 function schema_version(PDO $pdo) {
     try {
@@ -138,6 +138,13 @@ function schema_apply(PDO $pdo) {
     $add('devices', $d, 'silent_print', "ADD silent_print TINYINT NULL AFTER browser_view");
     // Agent DVR (live camera) di laptop, dilaporkan agent >= 1.23: none / stopped:VERSI / running:VERSI / installing
     $add('devices', $d, 'dvr_state', "ADD dvr_state VARCHAR(60) NULL");
+    // log kejadian per laptop: offline_since = last_seen saat "offline" dicatat (sekali per putus), dikosongkan heartbeat
+    if (!isset($d['offline_since'])) {
+        $pdo->exec("ALTER TABLE devices ADD offline_since DATETIME NULL AFTER last_seen");
+        // laptop yang sudah offline sebelum fitur ini: jangan dicatat offline serentak saat pertama jalan
+        $pdo->prepare("UPDATE devices SET offline_since=last_seen WHERE last_seen < NOW() - INTERVAL ? SECOND")->execute([in_array('settings', $tables, true) ? (int)setting('offline_after') : 60]);
+        $done[] = 'kolom devices.offline_since ditambahkan';
+    }
     // layar live (agent >= 1.14): sesi aktif selama live_until di masa depan (diperpanjang halaman penonton);
     // gambar terakhir disimpan sebagai file live/ID.jpg (ditimpa terus, dihapus saat sesi selesai)
     $add('devices', $d, 'live_until', "ADD live_until DATETIME NULL, ADD live_started DATETIME NULL, ADD live_by VARCHAR(50) NULL, ADD live_mode VARCHAR(10) NULL, ADD live_seq INT NOT NULL DEFAULT 0, ADD live_at DATETIME NULL, ADD live_err VARCHAR(200) NULL, ADD live_w INT NULL, ADD live_h INT NULL");
@@ -211,6 +218,11 @@ function schema_apply(PDO $pdo) {
   message VARCHAR(500) NOT NULL,
   created_at DATETIME NOT NULL,
   INDEX (created_at)");
+    // log kejadian per laptop (menu Log)
+    if (!$pdo->query("SHOW INDEX FROM logs WHERE Key_name = 'dev_time'")->fetch()) {
+        $pdo->exec("ALTER TABLE logs ADD INDEX dev_time (device_id, created_at)");
+        $done[] = 'index logs.dev_time ditambahkan';
+    }
     // Kategori lokasi laptop (tab + warna card di dashboard); wallpaper_id: NULL = ikut bawaan, 0 = jangan ubah
     $table('categories', "
   id INT AUTO_INCREMENT PRIMARY KEY,

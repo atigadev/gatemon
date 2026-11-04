@@ -14,7 +14,8 @@ $radmin = !empty($b['radmin_ok']) ? 1 : 0;
 
 $is_gate = $d['mode'] !== 'monitor';
 
-if (!$was_online) log_event($d['id'], 'info', "{$d['name']} online");
+if (!$was_online) log_event($d['id'], 'info', "{$d['name']} online" . ($d['last_seen']
+    ? ' (offline ' . dur_txt($age) . ' sejak ' . date('d/m H:i:s', strtotime($d['last_seen'])) . ')' : ' (pertama kali)'));
 // Satu ID laptop dipakai lebih dari satu komputer (agent hasil salin / config.json sama): heartbeat datang bergantian
 // dari hostname berbeda, sehingga laptop yang sudah mati tetap tampil online. Dicatat paling sering 10 menit sekali.
 $host_in = substr($b['hostname'] ?? '', 0, 100);
@@ -36,7 +37,7 @@ $public_ip = $_SERVER['REMOTE_ADDR'] ?? null;
 $lan_ip = filter_var($b['lan_ip'] ?? '', FILTER_VALIDATE_IP) ?: $public_ip;
 
 $pdo->prepare("UPDATE devices SET ip=?, public_ip=?, hostname=?, os_user=?, cpu=?, ram=?, disk=?, battery=?, battery_plugged=?, uptime_sec=?,
-    browser_running=?, gate_url_ok=?, gate_url_ms=?, net_ms=?, radmin_ok=?, agent_version=?, last_seen=NOW() WHERE id=?")
+    browser_running=?, gate_url_ok=?, gate_url_ms=?, net_ms=?, radmin_ok=?, agent_version=?, last_seen=NOW(), offline_since=NULL WHERE id=?")
     ->execute([
         $lan_ip,
         $public_ip,
@@ -167,6 +168,8 @@ if ($cmds) {
     $in = implode(',', array_fill(0, count($ids), '?'));
     $pdo->prepare("UPDATE commands SET status='sent', sent_at=NOW() WHERE id IN ($in)")->execute($ids);
 }
+
+log_offline_devices();                              // catat laptop lain yang berhenti melapor (menu Log)
 
 $gate_urls = gate_urls_of($d);                      // >1 URL = dibuka berdampingan (agent >= 1.8)
 $gate_url = $gate_urls ? $gate_urls[0] : '';

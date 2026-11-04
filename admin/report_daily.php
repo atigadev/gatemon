@@ -105,7 +105,7 @@ foreach (q("SELECT DATE(scanned_at) AS d, status, COUNT(*) AS n FROM scans WHERE
     $days[$r['d']]['fail'] += (int)$r['n'];
 }
 // operasional: laptop online kembali (setelah mati / terputus), gangguan (log peringatan/error laptop), darurat, chat, perintah
-foreach (q("SELECT DATE(created_at) AS d, SUM(level = 'info' AND message LIKE '% online') AS online, SUM(level <> 'info') AS issues
+foreach (q("SELECT DATE(created_at) AS d, SUM(level = 'info' AND (message LIKE '% online' OR message LIKE '% online (%')) AS online, SUM(level <> 'info') AS issues
     FROM logs WHERE created_at >= ? AND created_at < ? AND device_id IS NOT NULL GROUP BY DATE(created_at)", $rng) as $r) {
     if (!isset($days[$r['d']])) continue;
     $days[$r['d']]['online'] = (int)$r['online'];

@@ -81,6 +81,74 @@ function log_event($device_id, $level, $message) {
         ->execute([$device_id, $level, $message]);
 }
 
+// Lama waktu yang mudah dibaca: 45 dtk, 12 menit, 3 jam 5 menit, 2 hari 4 jam
+function dur_txt($sec) {
+    $sec = max(0, (int)$sec);
+    if ($sec < 60) return $sec . ' dtk';
+    if ($sec < 3600) return intdiv($sec, 60) . ' menit';
+    if ($sec < 86400) return intdiv($sec, 3600) . ' jam' . ($sec % 3600 >= 60 ? ' ' . intdiv($sec % 3600, 60) . ' menit' : '');
+    return intdiv($sec, 86400) . ' hari' . ($sec % 86400 >= 3600 ? ' ' . intdiv($sec % 86400, 3600) . ' jam' : '');
+}
+
+// Catat "offline" sekali per putus untuk laptop yang berhenti melapor (dipanggil heartbeat laptop lain & dashboard).
+// offline_since diisi lebih dulu dengan syarat masih kosong, jadi dua pemanggil bersamaan tidak mencatat dobel.
+function log_offline_devices() {
+    $pdo = db();
+    $off = (int)setting('offline_after');
+    $st = $pdo->prepare("SELECT id, name, last_seen FROM devices WHERE last_seen IS NOT NULL AND offline_since IS NULL AND last_seen < NOW() - INTERVAL ? SECOND");
+    $st->execute([$off]);
+    $up = $pdo->prepare("UPDATE devices SET offline_since=last_seen WHERE id=? AND offline_since IS NULL AND last_seen < NOW() - INTERVAL ? SECOND");
+    foreach ($st->fetchAll() as $d) {
+        $up->execute([$d['id'], $off]);
+        if ($up->rowCount()) log_event($d['id'], 'warn', "{$d['name']} offline (tidak melapor sejak " . date('d/m H:i:s', strtotime($d['last_seen'])) . ')');
+    }
+}
+
+// Jenis kejadian di log (menu Log): kunci => [label, pola LIKE pesan]
+const LOG_KINDS = [
+    'offline'  => ['Offline / online', ['% offline (%', '% online', '% online (%']],
+    'browser'  => ['Browser gate', ['%browser gate%']],
+    'gatepage' => ['Halaman gate', ['%halaman gate%']],
+    'darurat'  => ['Darurat', ['%tombol DARURAT%', '%darurat ditangani%']],
+    'shutdown' => ['Minta shutdown', ['%izin shutdown%', '%permintaan shutdown%']],
+    'command'  => ['Perintah', ['% mengirim %', '%: % done%', '%: % failed%']],
+    'agent'    => ['Agent & instalasi', ['%instalasi%', '%uninstall%', '%Paket agent%', '%paket instalasi%', '%dipakai lebih dari satu komputer%', '%UPDATE_AGENT%', '%INSTALL_DVR%']],
+    'device'   => ['Wallpaper, daya, support, DVR', ['%wallpaper%', '%kebijakan daya%', '%tombol support%', '%Agent DVR%', '%layar live%', '%Layar live%']],
+];
+function log_kind_sql($kind, &$params) {
+    $pats = LOG_KINDS[$kind][1] ?? [];
+    if (!$pats) return '1=1';
+    foreach ($pats as $p) $params[] = $p;
+    // catatan migrasi database bisa memuat kata kunci jenis lain (mis. "permintaan shutdown"): bukan kejadian
+    return "(l.message NOT LIKE 'Struktur database%' AND (" . implode(' OR ', array_fill(0, count($pats), 'l.message LIKE ?')) . '))';
+}
+function log_kind_of($msg) {
+    if (strpos($msg, 'Struktur database') === 0) return '';
+    foreach (LOG_KINDS as $k => [, $pats]) {
+        foreach ($pats as $p) {   // pola LIKE -> regex (% = apa saja), tanpa beda huruf besar/kecil seperti MySQL
+            $re = '/^' . implode('.*', array_map(function ($s) { return preg_quote($s, '/'); }, explode('%', $p))) . '$/isu';
+            if (preg_match($re, $msg)) return $k;
+        }
+    }
+    return '';
+}
+
+// CSV untuk Excel (BOM, titik koma); sel yang diawali = + - @ diberi awalan ' (CSV injection)
+function csv_cell($v) {
+    $v = (string)$v;
+    if ($v !== '' && strpos("=+-@\t\r", $v[0]) !== false) $v = "'" . $v;
+    return '"' . str_replace('"', '""', $v) . '"';
+}
+function csv_send($name, $rows) {
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Cache-Control: no-store');
+    // BOM agar Excel membaca UTF-8; titik koma = pemisah daftar Excel berbahasa Indonesia
+    echo "\xEF\xBB\xBF";
+    foreach ($rows as $r) echo implode(';', array_map('csv_cell', $r)), "\r\n";
+    exit;
+}
+
 // Autentikasi agent via header X-Device-Key + X-Device-Token
 function auth_device() {
     $key = $_SERVER['HTTP_X_DEVICE_KEY'] ?? '';

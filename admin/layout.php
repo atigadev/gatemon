@@ -14,6 +14,7 @@ function icon($name, $cls = 'ic') {
         'moon'      => '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
         'menu'      => '<path d="M3 6h18M3 12h18M3 18h18"/>',
         'expand'    => '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+        'log'       => '<path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1z"/><path d="M16 5h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2"/><path d="M9 11h6M9 15h6M9 19h3"/>',
         'bell'      => '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
         'download'  => '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/>',
         'plus'      => '<path d="M12 5v14M5 12h14"/>',
@@ -52,7 +53,7 @@ function page_head($title, $body_class = '', $extra = '') {
        . '<link rel="icon" type="image/png" href="icons/icon-192.png"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png">'
        . '<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="GateMon">'
        . '<title>' . h($title) . ' - ' . h($CFG['app_name']) . '</title>'
-       . '<link rel="stylesheet" href="style.css?v=48">'
+       . '<link rel="stylesheet" href="style.css?v=49">'
        . '<script nonce="' . csp_nonce() . '">(function(){try{var t=localStorage.getItem("gm_theme");}catch(e){}'
        . 'if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
        . 'document.documentElement.setAttribute("data-theme",t);})();</script>'
@@ -65,6 +66,7 @@ function nav_items() {
         'monitor'    => ['Monitor', 'monitor'],
         'report'     => ['Laporan', 'chart'],
         'support'    => ['Support', 'chat'],
+        'logs'       => ['Log', 'log'],
         'devices'    => ['Devices', 'devices'],
         'categories' => ['Kategori', 'tag'],
         'wallpaper'  => ['Wallpaper', 'image'],

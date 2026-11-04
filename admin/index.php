@@ -43,10 +43,10 @@ topbar('index', 'Monitoring Laptop');
   <section class="grid" id="grid"><p class="muted">Memuat…</p></section>
 
   <section class="panels">
-    <div class="card"><h2><?= icon('bell') ?> Log kejadian</h2><ul class="log" id="log"></ul></div>
+    <div class="card"><h2><?= icon('bell') ?> Log kejadian <a class="h2-link" href="logs.php">Semua / per laptop ›</a></h2><ul class="log" id="log"></ul></div>
     <div class="card"><h2><?= icon('pulse') ?> Perintah terakhir</h2><div class="table-wrap"><table class="table small" id="cmds"></table></div></div>
   </section>
 </main>
 
 <div class="modal" id="modal" hidden><div class="modal-box"><h3 id="m-title"></h3><div id="m-body"></div><div class="actions"><button class="btn" id="m-cancel">Tutup</button><button class="btn btn-primary" id="m-ok">Kirim</button></div></div></div>
-<?php page_foot(['alerts.js?v=3', 'app.js?v=20', 'shot.js?v=1']);
+<?php page_foot(['alerts.js?v=3', 'app.js?v=21', 'shot.js?v=1']);

@@ -884,3 +884,15 @@ body:has(.shotv:not([hidden])) .gm-pops{top:auto;bottom:44px;transform:translate
 .bulk-tip > div span{font-size:12.5px}.bulk-tip .btn{padding:6px 11px;font-size:12.5px}
 .form-modal > .bulk-tip{margin:16px 22px 0}
 @media (max-width:520px){ .form-modal > .bulk-tip{margin:14px 16px 0} .bulk-tip > div{flex-basis:100%} .bulk-tip > .ic{display:none} }
+
+/* log kejadian per laptop (menu Log) */
+.h2-link{margin-left:auto;font-size:12.5px;font-weight:500}
+.nowrap{white-space:nowrap}
+.lv-badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;background:var(--surface-2,rgba(127,127,127,.12));color:var(--muted)}
+.lv-badge.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.lv-badge.error{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.log-table tr.lv-error td:last-child{color:var(--bad)}
+.log-table td:last-child{min-width:260px}
+.log-rekap td.bad{color:var(--bad);font-weight:600}
+.logs .pager{margin-top:12px;justify-content:center;gap:10px}
+@media print{ .log-table,.log-rekap{font-size:9.5px} .log-table td,.log-rekap td,.log-rekap th{padding:4px 5px} .lv-badge{border:1px solid #999} }
