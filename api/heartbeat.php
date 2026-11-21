@@ -135,6 +135,40 @@ if (!empty($b['scans']) && is_array($b['scans'])) {
     }
 }
 
+// Traffic ke host URL gate (agent >= 1.25): ringkasan per menit {t: awal menit (epoch), h: {host: [masuk, keluar, koneksi]},
+// tot: [masuk, keluar] seluruh laptop}. Semua menit yang terbaca di-ack (traffic_ack) agar dihapus dari antrean agent;
+// kiriman ulang menimpa baris yang sama (bukan menambah), jadi tidak dobel.
+$tack = [];
+if (!empty($b['traffic']) && is_array($b['traffic'])) {
+    $ins = $pdo->prepare("INSERT INTO traffic (device_id, host, minute, bytes_in, bytes_out, conns) VALUES (?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE bytes_in=VALUES(bytes_in), bytes_out=VALUES(bytes_out), conns=VALUES(conns)");
+    $allow = traffic_hosts_of($d);                    // hanya host URL gate laptop ini
+    $num = function ($v, $max = 1e12) { return is_numeric($v) ? (int)max(0, min($max, $v)) : 0; };
+    foreach (array_slice($b['traffic'], 0, 200) as $m) {
+        $t = is_array($m) ? (int)($m['t'] ?? 0) : 0;
+        if ($t <= 0 || $t % 60) continue;
+        $tack[] = $t;
+        if ($t < time() - 86400 * TRAFFIC_KEEP_DAYS || $t > time() + 600) continue;   // jam laptop ngawur: dibuang
+        $rows = [];
+        foreach (is_array($m['h'] ?? null) ? $m['h'] : [] as $host => $v) {
+            $host = strtolower((string)$host);
+            if (is_array($v) && in_array($host, $allow, true)) $rows[$host] = $v;
+        }
+        if (!$rows) continue;
+        if (is_array($m['tot'] ?? null)) $rows['*'] = $m['tot'] + [0, 0, 0];
+        foreach ($rows as $host => $v) $ins->execute([$d['id'], $host, date('Y-m-d H:i:00', $t), $num($v[0] ?? 0), $num($v[1] ?? 0), $num($v[2] ?? 0, 65535)]);
+    }
+    if (mt_rand(1, 500) === 1) $pdo->exec("DELETE FROM traffic WHERE minute < NOW() - INTERVAL " . TRAFFIC_KEEP_DAYS . " DAY");
+}
+if (isset($b['traffic_err'])) {
+    $te = mb_substr(preg_replace('/[\x00-\x1F\x7F]/', ' ', (string)$b['traffic_err']), 0, 200);
+    $te = $te === '' ? null : $te;
+    if ($te !== $d['traffic_err']) {
+        $pdo->prepare("UPDATE devices SET traffic_err=? WHERE id=?")->execute([$te, $d['id']]);
+        if ($te !== null) log_event($d['id'], 'warn', "{$d['name']}: traffic URL gate tidak bisa diukur ($te)");
+    }
+}
+
 // Tombol Chat Support / DARURAT gagal tampil di laptop (agent >= 1.11); dicatat paling sering 1 jam sekali
 if (!empty($b['support_err'])) {
     $st = $pdo->prepare("SELECT COUNT(*) FROM logs WHERE device_id=? AND message LIKE '%tombol support gagal%' AND created_at > NOW() - INTERVAL 1 HOUR");
@@ -180,6 +214,7 @@ $wallpaper = $w ? ['sha' => $w['sha256'], 'ext' => $w['ext'], 'bytes' => (int)$w
 json_out(['ok' => true, 'wallpaper' => $wallpaper, 'policy' => policy_cfg(), 'support' => support_hb($d), 'live' => live_hb($d), 'server_time' => date('c'), 'interval' => setting('heartbeat_interval'), 'mode' => $d['mode'],
     'auto_open' => setting('auto_open_gate'), 'auto_reopen' => setting('auto_reopen_gate'), 'reopen_after' => setting('reopen_after'),
     'gate_check_every' => setting('gate_check_interval'), 'scan_capture' => $scan_on ? 1 : 0, 'scans_ack' => $ack,
+    'traffic_ack' => $tack, 'traffic_hosts' => traffic_hosts_of($d),
     'scan_page_match' => setting_patterns('scan_page_match'), 'scan_api_match' => setting_patterns('scan_api_match'),
     'scan_purpose_keys' => setting_patterns('scan_purpose_key'),
     'gate_url' => $gate_url, 'gate_urls' => $gate_urls, 'browser_view' => browser_view_of($d), 'silent_print' => silent_print_of($d) ? 1 : 0, 'dvr_port' => dvr_port(), 'commands' => $cmds]);

@@ -328,6 +328,36 @@ function effective_gate_url($d) {
 }
 // Semua URL halaman yang dibuka otomatis (1 per baris di menu Devices, maks 4). >1 URL = jendela berdampingan.
 const GATE_URL_MAX = 4;
+
+// ---------- traffic ke host URL gate (agent >= 1.25, menu Traffic) ----------
+const TRAFFIC_MIN = '1.25.0';
+const TRAFFIC_KEEP_DAYS = 14;
+const TRAFFIC_HOST_RE = '/^([a-z0-9-]{1,63}\.)*[a-z0-9-]{1,63}$|^[0-9a-f:]{2,45}$/';
+
+// Host yang diukur agent: host dari URL halaman gate laptop (juga laptop mode monitor yang punya URL)
+function traffic_hosts_of($d) {
+    global $CFG;
+    $urls = array_filter(array_map('trim', preg_split('/\R+/', (string)($d['gate_url'] ?? ''))), function ($u) { return preg_match('#^https?://#i', $u); });
+    if (!$urls) $urls = [$CFG['default_gate_url'] . rawurlencode($d['device_key'])];
+    $hosts = [];
+    foreach (array_slice(array_values($urls), 0, GATE_URL_MAX) as $u) {
+        $h = trim(strtolower((string)parse_url($u, PHP_URL_HOST)), '[]');
+        if ($h !== '' && preg_match(TRAFFIC_HOST_RE, $h) && !in_array($h, $hosts, true)) $hosts[] = $h;
+    }
+    return $hosts;
+}
+
+// 1536 -> "1,5 KB"; bit/detik -> "2,4 Mbps"
+function bytes_txt($b) {
+    $u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    for ($i = 0; $b >= 1024 && $i < 4; $i++) $b /= 1024;
+    return ($i ? number_format($b, $b < 10 ? 2 : ($b < 100 ? 1 : 0), ',', '.') : (int)$b) . ' ' . $u[$i];
+}
+function bps_txt($bps) {
+    $u = ['bps', 'kbps', 'Mbps', 'Gbps'];
+    for ($i = 0; $bps >= 1000 && $i < 3; $i++) $bps /= 1000;
+    return number_format($bps, $i && $bps < 10 ? 2 : ($i && $bps < 100 ? 1 : 0), ',', '.') . ' ' . $u[$i];
+}
 function gate_urls_of($d) {
     global $CFG;
     if (($d['mode'] ?? 'gate') === 'monitor') return [];

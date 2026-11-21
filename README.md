@@ -73,11 +73,42 @@ Menu **Log** berisi semua kejadian per laptop: offline / online kembali (dengan 
 - Dari dashboard: klik card laptop, lalu pilih **Log kejadian laptop ini**.
 - Offline dicatat sekali saat laptop berhenti melapor lebih dari batas offline (menu Pengaturan). Pencatatan dilakukan oleh heartbeat laptop lain atau dashboard yang terbuka. Saat laptop online kembali, lama offline-nya ikut tercatat.
 
+## Traffic URL gate (menu Traffic, agent 1.25+)
+
+Menu **Traffic** menampilkan download / upload tiap laptop ke host halaman gate-nya (mis. `sevenems.com`, `www.auto360.id`;
+host diambil otomatis dari URL halaman gate di menu Devices): total per periode (1 jam / 6 jam / 24 jam / 7 hari), kecepatan
+sekarang, puncak per menit, porsi dari seluruh traffic laptop, dan grafik download / upload. Klik nama laptop untuk grafiknya sendiri.
+
+- Diukur agent di laptop: byte koneksi TCP ke IP host itu (statistik koneksi bawaan Windows, tanpa driver), dikirim per menit
+  bersama heartbeat. Isi data tidak dibaca. Perlu hak admin (tugas agent "Run with highest privileges", bawaan installer);
+  bila tidak bisa, status "tidak terukur" beserta alasannya tampil dan tercatat di menu Log.
+- Browser gate dibuka tanpa QUIC dan tanpa DNS-over-HTTPS browser agar lalu lintasnya lewat TCP + DNS Windows (terukur).
+  Berlaku setelah browser gate dibuka ulang (perintah Restart browser / restart laptop).
+- Host di CDN bersama (mis. Cloudflare) bisa ikut menghitung situs lain yang memakai IP yang sama.
+- Data per menit disimpan 14 hari (`TRAFFIC_KEEP_DAYS` di db.php). Laptop yang dihapus ikut dihapus datanya.
+
 ## Kategori lokasi
 Menu **Kategori** (supervisor) untuk mengatur lokasi laptop: Gate, Tiket Box, Convention, Opening, Lain-lain
 (bisa ditambah, diubah nama/warna/urutan). Pilih kategori tiap laptop di menu Devices.
 Dashboard menampilkan tab per kategori (jumlah laptop + jumlah yang bermasalah), card diberi pita warna kategorinya,
 dan tombol "Kirim ke semua" hanya berlaku untuk laptop di tab yang sedang dibuka.
+
+## Cetak label komputer (printer thermal)
+
+Menu **Devices → Cetak label**: stiker nama laptop untuk ditempel di komputer. Pilih laptop (filter kategori / cari), ukuran label
+(stiker 40×30, 50×30, 60×40, 70×30, 100×50 mm, kertas struk 58 / 80 mm, atau ukuran lain), lalu isi label: nama laptop (huruf otomatis
+sebesar mungkin, nama panjang dipecah di spasi / tanda -), ID laptop, kategori, gate / pos, teks atas (mis. nama event), barcode
+Code 128 ID laptop, garis tepi, dan rangkap per laptop. Satu label = satu halaman seukuran label, jadi printer label maju / memotong per label.
+Di dialog print pilih printer thermal, ukuran kertas = ukuran label (atur sekali di Preferences printer), margin None, skala 100%,
+tanpa Headers and footers. Pilihan terakhir diingat di browser itu.
+
+**Brother QL-800**: pilih ukuran rol DK di grup "Brother QL-800" (DK-11201 29×90, DK-11209 29×62, DK-11208 38×90, DK-11202 62×100,
+DK-11204 17×54, rol kontinu DK-22205 62 mm / DK-22210 29 mm / DK-22225 38 mm). Pasang driver Brother QL-800, matikan lampu Editor Lite,
+di Printing Preferences samakan Paper Size dengan rol dan pilih Cut every 1 label; di dialog print browser pilih Paper size yang sama,
+Orientasi Portrait, Margins None, Scale 100 (bukan Fit to page). Halaman dikirim persis seperti kertas keluar dari printer
+(lebar rol × panjang, mis. 62 × 100). Pilihan "Arah cetak": rol 62 mm otomatis mendatar searah keluar kertas (halaman selebar
+rol dan setinggi label tanpa ruang kosong; "Tinggi label / kotak", "Huruf nama" dan "Huruf info" (mm) bisa diatur, kosong = otomatis, pakai rol kontinu 62 mm agar dipotong pas); rol sempit 29 / 38 mm otomatis diputar 90° agar nama besar. Nama dengan tanda - (GATE-IN-01)
+tetap satu baris, info bawah diperkecil otomatis agar tidak terpotong. Langkahnya juga tampil di halaman Cetak label.
 
 ## Export / import laptop (CSV)
 Menu **Devices › Export / import CSV** (supervisor). **Export** mengunduh semua laptop ke CSV (dibuka di Excel) dalam

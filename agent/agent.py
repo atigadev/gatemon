@@ -7,7 +7,7 @@ import base64, collections, ctypes, hashlib, io, ipaddress, json, logging, os, p
 import psutil, requests
 from urllib.parse import parse_qs, urlparse
 
-VERSION = "1.24.0"
+VERSION = "1.25.0"
 # Kunci publik rilis update (Ed25519). Hanya rilis yang ditandatangani kunci rahasia pasangannya yang mau dipasang.
 # Diisi oleh admin-tools/rilis-agent.bat kunci-baru; kosong = update otomatis mati.
 UPDATE_PUBKEY = "8dc4a02e3d91eb05e2547cc10f7d0338dc04a38d089206af52aa39cdc4112524"
@@ -57,7 +57,8 @@ def view_key():
 
 
 def browser_flags():
-    return ["--kiosk-printing"] if silent_print else []
+    # --disable-quic & tanpa DNS-over-HTTPS browser: halaman gate lewat TCP + resolver Windows, sehingga traffic-nya terukur (agent >= 1.25)
+    return (["--kiosk-printing"] if silent_print else []) + ["--disable-quic", "--disable-features=DnsOverHttps"]
 net_ms = None     # waktu respon heartbeat terakhir ke server
 
 
@@ -2671,6 +2672,197 @@ def uninstall_start():
     log.warning("UNINSTALL: uninstaller dijalankan lewat tugas %s; agent berhenti", UNINSTALL_TASK)
 
 
+# ---------- traffic ke host URL gate (agent >= 1.25) ----------
+# Mengukur byte download / upload laptop ini ke host halaman gate (mis. sevenems.com) tanpa driver tambahan:
+# daftar koneksi TCP Windows (GetExtendedTcpTable) + statistik byte per koneksi (TCP EStats, perlu hak admin; agent jalan
+# "Highest"). IP host diambil dari resolver Windows (cache DNS yang sama dengan browser). Isi data tidak dibaca, hanya jumlah byte.
+# Browser gate dibuka dengan --disable-quic agar halaman gate lewat TCP (QUIC/UDP tidak terukur). Ringkasan per menit
+# dikirim bersama heartbeat (traffic) dan dihapus dari antrean setelah server membalas traffic_ack.
+TRAFFIC_Q = collections.deque(maxlen=1440)              # menit yang sudah lengkap, belum diterima server (maks 1 hari)
+_trf_lock = threading.Lock()
+_trf = {"err": "", "ips": {}, "resolved": 0, "conn": {}, "bucket": None, "net": None}
+traffic_hosts = []                                       # dari server (heartbeat); kosong = host dari URL halaman gate
+TRF_POLL = 2                                             # detik
+TRF_STATES = (5, 6, 7, 8, 9, 10)                         # ESTABLISHED, FIN_WAIT1/2, CLOSE_WAIT, CLOSING, LAST_ACK
+
+if IS_WIN:
+    from ctypes import wintypes
+
+    class _TCPROW_PID(ctypes.Structure):
+        _fields_ = [("state", wintypes.DWORD), ("laddr", wintypes.DWORD), ("lport", wintypes.DWORD),
+                    ("raddr", wintypes.DWORD), ("rport", wintypes.DWORD), ("pid", wintypes.DWORD)]
+
+    class _TCPROW(ctypes.Structure):
+        _fields_ = [("state", wintypes.DWORD), ("laddr", wintypes.DWORD), ("lport", wintypes.DWORD),
+                    ("raddr", wintypes.DWORD), ("rport", wintypes.DWORD)]
+
+    class _TCP6ROW_PID(ctypes.Structure):
+        _fields_ = [("laddr", ctypes.c_ubyte * 16), ("lscope", wintypes.DWORD), ("lport", wintypes.DWORD),
+                    ("raddr", ctypes.c_ubyte * 16), ("rscope", wintypes.DWORD), ("rport", wintypes.DWORD),
+                    ("state", wintypes.DWORD), ("pid", wintypes.DWORD)]
+
+    class _TCP6ROW(ctypes.Structure):
+        _fields_ = [("state", wintypes.DWORD), ("laddr", ctypes.c_ubyte * 16), ("lscope", wintypes.DWORD), ("lport", wintypes.DWORD),
+                    ("raddr", ctypes.c_ubyte * 16), ("rscope", wintypes.DWORD), ("rport", wintypes.DWORD)]
+
+    class _ESTATS_DATA_ROD(ctypes.Structure):          # TCP_ESTATS_DATA_ROD_v0
+        _fields_ = [("DataBytesOut", ctypes.c_uint64), ("DataSegsOut", ctypes.c_uint64), ("DataBytesIn", ctypes.c_uint64),
+                    ("DataSegsIn", ctypes.c_uint64), ("SegsOut", ctypes.c_uint64), ("SegsIn", ctypes.c_uint64),
+                    ("SoftErrors", ctypes.c_ulong), ("SoftErrorReason", ctypes.c_ulong), ("SndUna", ctypes.c_ulong),
+                    ("SndNxt", ctypes.c_ulong), ("SndMax", ctypes.c_ulong), ("ThruBytesAcked", ctypes.c_uint64),
+                    ("RcvNxt", ctypes.c_ulong), ("ThruBytesReceived", ctypes.c_uint64)]
+
+
+def _tcp_table(af):
+    """Semua koneksi TCP (IPv4 / IPv6) beserta PID pemiliknya."""
+    iph = ctypes.windll.iphlpapi
+    row_t = _TCPROW_PID if af == socket.AF_INET else _TCP6ROW_PID
+    size = wintypes.DWORD(0)
+    iph.GetExtendedTcpTable(None, ctypes.byref(size), False, af, 5, 0)          # 5 = TCP_TABLE_OWNER_PID_ALL
+    for _ in range(3):
+        buf = ctypes.create_string_buffer(size.value + 4096)
+        size = wintypes.DWORD(len(buf))
+        rc = iph.GetExtendedTcpTable(buf, ctypes.byref(size), False, af, 5, 0)
+        if rc == 0:
+            n = ctypes.c_uint32.from_buffer(buf).value
+            off = ctypes.sizeof(ctypes.c_uint32)
+            return [row_t.from_buffer_copy(buf, off + i * ctypes.sizeof(row_t)) for i in range(n)]
+        if rc != 122:                                                           # 122 = buffer kurang: ulangi
+            raise OSError(rc, "GetExtendedTcpTable gagal")
+    return []
+
+
+def _estats(af, r, enable):
+    """(byte masuk, byte keluar) koneksi r sejak pengumpulan diaktifkan (enable = koneksi baru dilihat); None bila sudah hilang."""
+    iph = ctypes.windll.iphlpapi
+    if af == socket.AF_INET:
+        row = _TCPROW(r.state, r.laddr, r.lport, r.raddr, r.rport)
+        setf, getf = iph.SetPerTcpConnectionEStats, iph.GetPerTcpConnectionEStats
+    else:
+        row = _TCP6ROW(r.state, r.laddr, r.lscope, r.lport, r.raddr, r.rscope, r.rport)
+        setf, getf = iph.SetPerTcp6ConnectionEStats, iph.GetPerTcp6ConnectionEStats
+    if enable:
+        rw = ctypes.c_ubyte(1)                                                  # TCP_ESTATS_DATA_RW_v0.EnableCollection
+        rc = setf(ctypes.byref(row), 1, ctypes.byref(rw), 0, 1, 0)              # 1 = TcpConnectionEstatsData
+        if rc == 5:
+            raise PermissionError("perlu hak administrator (tugas agent harus Run with highest privileges)")
+        if rc != 0:
+            return None
+    rod = _ESTATS_DATA_ROD()
+    rc = getf(ctypes.byref(row), 1, None, 0, 0, None, 0, 0, ctypes.byref(rod), 0, ctypes.sizeof(rod))
+    if rc != 0:
+        return None
+    return int(rod.DataBytesIn), int(rod.DataBytesOut)
+
+
+def _trf_hosts():
+    if traffic_hosts:
+        return list(traffic_hosts)
+    out = []
+    for u in (gate_urls or ([gate_url] if gate_url else [])):
+        h = (urlparse(u).hostname or "").lower()
+        if h and h not in out:
+            out.append(h)
+    return out
+
+
+def _trf_resolve(hosts):
+    """IP -> host. IP yang pernah dipakai host tetap diingat 2 jam (DNS bergilir / CDN)."""
+    now = time.time()
+    ips = {ip: v for ip, v in _trf["ips"].items() if v[0] in hosts and now - v[1] < 7200}
+    for h in hosts:
+        try:
+            for *_, sa in socket.getaddrinfo(h, 443, proto=socket.IPPROTO_TCP):
+                ips[sa[0].split("%")[0]] = (h, now)
+        except OSError:
+            pass
+    _trf["ips"], _trf["resolved"] = ips, now
+
+
+def _net_total():
+    """Byte masuk / keluar semua kartu jaringan laptop (tanpa loopback), untuk pembanding."""
+    rx = tx = 0
+    for name, c in psutil.net_io_counters(pernic=True).items():
+        if "loopback" not in name.lower():
+            rx, tx = rx + c.bytes_recv, tx + c.bytes_sent
+    return rx, tx
+
+
+def _trf_flush(now_min):
+    """Tutup menit berjalan: masukkan ke antrean kirim dan mulai menit baru."""
+    b = _trf["bucket"]
+    rx, tx = _net_total()
+    if b and b["h"]:
+        prx, ptx = _trf["net"] or (rx, tx)
+        b["tot"] = [max(0, rx - prx), max(0, tx - ptx)]
+        with _trf_lock:
+            TRAFFIC_Q.append(b)
+    _trf["net"] = (rx, tx)
+    _trf["bucket"] = {"t": now_min, "h": {}}
+
+
+def _trf_tick(own_pid):
+    hosts = _trf_hosts()
+    now = time.time()
+    m = int(now // 60 * 60)
+    if not _trf["bucket"] or _trf["bucket"]["t"] != m:
+        _trf_flush(m)
+    if not hosts:
+        _trf["conn"].clear()
+        return
+    if now - _trf["resolved"] > 30 or hosts != _trf.get("hosts"):      # tiap 30 detik, atau segera bila daftar host berubah
+        _trf["hosts"] = hosts
+        _trf_resolve(hosts)
+    ips = _trf["ips"]
+    bucket = _trf["bucket"]["h"]
+    for h in hosts:
+        bucket.setdefault(h, [0, 0, 0])
+    seen, active = {}, collections.Counter()
+    for af in (socket.AF_INET, socket.AF_INET6):
+        for r in _tcp_table(af):
+            if r.state not in TRF_STATES or r.pid == own_pid:
+                continue
+            ip = socket.inet_ntoa(r.raddr.to_bytes(4, "little")) if af == socket.AF_INET else socket.inet_ntop(af, bytes(r.raddr))
+            hit = ips.get(ip)
+            if not hit:
+                continue
+            key = (af, ip, r.lport, r.rport, r.pid)
+            st = _estats(af, r, key not in _trf["conn"])
+            if st is None:
+                continue
+            host = hit[0]
+            active[host] += 1
+            last = _trf["conn"].get(key)
+            if last is not None:                             # koneksi baru: nilai awal saja (tanpa riwayat sebelum dipantau)
+                din, dout = st[0] - last[0], st[1] - last[1]
+                if din >= 0 and dout >= 0:
+                    v = bucket.setdefault(host, [0, 0, 0])
+                    v[0] += din
+                    v[1] += dout
+            seen[key] = st
+    _trf["conn"] = seen
+    for h, n in active.items():
+        v = bucket.setdefault(h, [0, 0, 0])
+        v[2] = max(v[2], n)
+
+
+def traffic_watcher():
+    if not IS_WIN:
+        return
+    own = os.getpid()
+    logged = ""
+    while True:
+        try:
+            _trf_tick(own)
+            _trf["err"] = ""
+        except Exception as e:
+            _trf["err"] = str(e)[:180]
+            if _trf["err"] != logged:
+                log.warning("traffic: %s", _trf["err"])
+        logged = _trf["err"]
+        time.sleep(TRF_POLL)
+
+
 # ---------- pindah server (agent >= 1.13) ----------
 # Perintah SET_SERVER dari server lama: agent menguji dulu server baru dengan ID + token-nya (api/ping.php, harus
 # sudah berisi database yang sama). Berhasil -> hasil dilaporkan ke server LAMA, lalu config.json diganti. Server lama
@@ -2761,13 +2953,14 @@ def server_move_failed():
 
 # ---------- loop utama ----------
 def main():
-    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture, browser_view, silent_print
+    global gate_url, gate_urls, mode, net_ms, gate_check_every, scan_capture, browser_view, silent_print, traffic_hosts
     interval = int(CFG.get("interval", 5))
     log.info("agent %s start, server %s, device %s", VERSION, SERVER, CFG["device_key"])
     psutil.cpu_percent(interval=None)
     update_startup()
     install_uninstaller()
     threading.Thread(target=scan_watcher, daemon=True).start()
+    threading.Thread(target=traffic_watcher, daemon=True).start()
     while True:
         try:
             body = collect()
@@ -2775,6 +2968,11 @@ def main():
                 batch = list(SCAN_Q)[:200]                       # scan yang belum terkirim (maks 200 per heartbeat)
             if batch:
                 body["scans"] = batch
+            with _trf_lock:
+                tbatch = list(TRAFFIC_Q)[:120]                   # ringkasan traffic per menit yang belum diterima server
+            if tbatch:
+                body["traffic"] = tbatch
+            body["traffic_err"] = _trf["err"]
             t = time.time()
             r = SRV.post(f"{SERVER}/api/heartbeat.php", json=body, timeout=10)
             net_ms = int((time.time() - t) * 1000)
@@ -2802,6 +3000,16 @@ def main():
                         keep = [s for s in SCAN_Q if s["sid"] not in ack]
                         SCAN_Q.clear()
                         SCAN_Q.extend(keep)
+                tack = set(j.get("traffic_ack") or [])
+                if tack:
+                    with _trf_lock:
+                        keep = [t for t in TRAFFIC_Q if t["t"] not in tack]
+                        TRAFFIC_Q.clear()
+                        TRAFFIC_Q.extend(keep)
+                if isinstance(j.get("traffic_hosts"), list):     # host URL gate yang diukur (server lama tidak mengirim)
+                    traffic_hosts = [str(h).lower() for h in j["traffic_hosts"]
+                                     if re.fullmatch(r"[a-z0-9.\-]{1,253}|\[?[0-9a-f:]{2,45}\]?", str(h).lower())][:8]
+                    traffic_hosts = [h.strip("[]") for h in traffic_hosts]
                 if j.get("mode") in ("gate", "monitor") and j["mode"] != mode:
                     mode = j["mode"]
                     log.info("mode laptop: %s", mode)

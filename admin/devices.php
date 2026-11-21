@@ -111,6 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (is_supervisor() || (is_operator() 
         $msg = 'Token baru dibuat. Perbarui config.json di laptop tersebut.';
     } elseif ($act === 'delete') {
         $pdo->prepare("DELETE FROM commands WHERE device_id=?")->execute([(int)$_POST['id']]);
+        $pdo->prepare("DELETE FROM traffic WHERE device_id=?")->execute([(int)$_POST['id']]);
         $pdo->prepare("DELETE FROM devices WHERE id=?")->execute([(int)$_POST['id']]);
         $msg = 'Laptop dihapus.';
     }
@@ -149,7 +150,7 @@ topbar('devices', 'Monitoring Laptop');
 <main class="page">
   <div class="page-head">
     <div><h1>Devices</h1><p class="muted">Daftar laptop yang dipantau, token agent, dan paket instalasi agent.</p></div>
-    <?php if ($sup): ?><div class="head-btns"><a class="btn" href="devices_csv.php" title="Export daftar laptop ke CSV / tambah banyak laptop sekaligus dari Excel"><?= icon('download') ?> Export / import CSV</a><button class="btn btn-primary" type="button" data-dev-add><?= icon('plus') ?> Tambah laptop</button></div><?php endif; ?>
+    <div class="head-btns"><a class="btn" href="labels.php" title="Cetak stiker nama laptop ke printer thermal / label"><?= icon('print') ?> Cetak label</a><?php if ($sup): ?><a class="btn" href="devices_csv.php" title="Export daftar laptop ke CSV / tambah banyak laptop sekaligus dari Excel"><?= icon('download') ?> Export / import CSV</a><button class="btn btn-primary" type="button" data-dev-add><?= icon('plus') ?> Tambah laptop</button><?php endif; ?></div>
   </div>
 <?= flash($form_err === null ? $msg : '') ?>
 
@@ -175,6 +176,7 @@ topbar('devices', 'Monitoring Laptop');
   <div class="table-tools">
     <h2><?= icon('devices') ?> Daftar laptop <span class="badge" id="dev-count"><?= count($devices) ?></span></h2>
     <div class="filters">
+      <a class="btn" href="labels.php" title="Cetak stiker nama laptop ke printer thermal / label"><?= icon('print') ?> Cetak label</a>
       <input type="search" id="dev-q" placeholder="Cari ID, nama, pos, IP…" aria-label="Cari laptop">
       <select id="dev-cat" aria-label="Filter kategori">
         <option value="">Semua kategori</option>
@@ -220,6 +222,7 @@ topbar('devices', 'Monitoring Laptop');
       ?></td>
       <?php if ($sup): ?><td data-label="Token"><button type="button" class="token-btn" data-token="<?= h($d['token']) ?>" title="Klik untuk tampilkan dan salin">••••••••</button></td><?php endif; ?>
       <td data-label="Aksi" class="actions right">
+        <a class="icon-btn sm" href="labels.php?ids=<?= $d['id'] ?>" title="Cetak label laptop ini" aria-label="Cetak label <?= h($d['name']) ?>"><?= icon('print') ?></a>
         <?php if ($sup): ?><button type="button" class="icon-btn sm" title="Edit" aria-label="Edit <?= h($d['name']) ?>" data-dev-edit="<?= h(json_encode($data)) ?>"><?= icon('edit') ?></button><?php endif; ?>
         <button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll" title="Buat kode instalasi (username + password sekali pakai)" aria-label="Kode instalasi"<?= $code_active ? ' data-confirm="Kode lama untuk ' . h($d['device_key']) . ' masih aktif dan akan diganti. Lanjutkan?"' : '' ?>><?= icon('enroll') ?></button>
         <?php if ($code_active): ?><button form="f<?= $d['id'] ?>" class="icon-btn sm" name="act" value="enroll_cancel" title="Batalkan kode instalasi" aria-label="Batalkan kode"><?= icon('x') ?></button><?php endif; ?>

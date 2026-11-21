@@ -3,7 +3,7 @@
 // Dijalankan otomatis oleh db() bila settings.schema_version < SCHEMA_VERSION (setelah kode diperbarui),
 // juga oleh setup.php (instalasi baru) dan migrasi/import.php (setelah impor database server lama).
 // NAIKKAN SCHEMA_VERSION setiap kali menambah tabel/kolom di bawah.
-const SCHEMA_VERSION = 18;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA); 16 = cetak langsung tanpa dialog per laptop (agent 1.22); 17 = status Agent DVR di laptop (agent 1.23); 18 = log kejadian per laptop (offline tercatat)
+const SCHEMA_VERSION = 19;   // 2 = wallpaper (agent 1.9); 3 = wallpaper per laptop + kebijakan daya/Windows Update (agent 1.10); 4 = group kategori scan; 5 = chat support + darurat (agent 1.11); 6 = tombol support per laptop (agent 1.12); 7 = keamanan server publik; 8 = layar live (agent 1.14); 9 = peran petugas (operator); 10 = permintaan shutdown dari laptop (agent 1.19); 11 = peruntukan hasil scan (agent 1.20); 12-13 = lengkapi peruntukan dari halaman cek undangan; 14 = tampilan browser gate per laptop (agent 1.21); 15 = push notification (PWA); 16 = cetak langsung tanpa dialog per laptop (agent 1.22); 17 = status Agent DVR di laptop (agent 1.23); 18 = log kejadian per laptop (offline tercatat); 19 = traffic ke host URL gate (agent 1.25)
 
 function schema_version(PDO $pdo) {
     try {
@@ -145,6 +145,8 @@ function schema_apply(PDO $pdo) {
         $pdo->prepare("UPDATE devices SET offline_since=last_seen WHERE last_seen < NOW() - INTERVAL ? SECOND")->execute([in_array('settings', $tables, true) ? (int)setting('offline_after') : 60]);
         $done[] = 'kolom devices.offline_since ditambahkan';
     }
+    // traffic ke host URL gate (agent >= 1.25): alasan bila agent tidak bisa mengukur (mis. tanpa hak admin)
+    $add('devices', $d, 'traffic_err', "ADD traffic_err VARCHAR(200) NULL");
     // layar live (agent >= 1.14): sesi aktif selama live_until di masa depan (diperpanjang halaman penonton);
     // gambar terakhir disimpan sebagai file live/ID.jpg (ditimpa terus, dihapus saat sesi selesai)
     $add('devices', $d, 'live_until', "ADD live_until DATETIME NULL, ADD live_started DATETIME NULL, ADD live_by VARCHAR(50) NULL, ADD live_mode VARCHAR(10) NULL, ADD live_seq INT NOT NULL DEFAULT 0, ADD live_at DATETIME NULL, ADD live_err VARCHAR(200) NULL, ADD live_w INT NULL, ADD live_h INT NULL");
@@ -284,6 +286,18 @@ function schema_apply(PDO $pdo) {
         $done[] = 'permintaan shutdown dari laptop ditambahkan';
     }
     $add('support_msgs', $sm, 'decision', "ADD decision ENUM('approved','rejected','cancelled') NULL AFTER ack_by");
+
+    // Traffic laptop ke host URL gate per menit (agent >= 1.25). host '*' = seluruh traffic laptop (pembanding).
+    // Hanya jumlah byte; disimpan TRAFFIC_KEEP_DAYS hari.
+    $table('traffic', "
+  device_id INT NOT NULL,
+  host VARCHAR(190) NOT NULL,
+  minute DATETIME NOT NULL,
+  bytes_in BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  bytes_out BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  conns SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (device_id, minute, host),
+  INDEX minute (minute)");
 
     // Push notification ke HP/PC (PWA, Web Push): satu baris per browser yang mengaktifkan notifikasi (menu Notifikasi).
     // ep_hash = sha256(endpoint) untuk UNIQUE (endpoint terlalu panjang untuk index). Kunci VAPID server di tabel settings.
